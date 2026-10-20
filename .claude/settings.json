@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "databricks@claude-plugins-official": true,
+    "databricks@databricks-agent-skills": true
+  }
+}
