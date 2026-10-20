@@ -5,5 +5,12 @@ streamlit>=1.30
 requests>=2.31
 pytest>=7.4
 
+# Local document parsing (Phase 2 / local pipeline)
+python-docx>=1.1
+pypdf>=5.0
+
+# Local LLM generation uses Ollama over HTTP (stdlib urllib) - no Python package.
+# Install Ollama separately and run: ollama pull llama3.2:3b
+
 # Databricks workspace access (catalogs, SQL statement execution, bundles)
 databricks-sdk>=0.154

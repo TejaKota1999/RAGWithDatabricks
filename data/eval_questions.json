@@ -1,0 +1,38 @@
+[
+  {
+    "question": "How long is the warranty service and repair window for a company iPhone?",
+    "expected_document_id": "Apple_iPhone_Warranty_Repair_Replacement_Policy",
+    "answerable": true,
+    "notes": "Single-chunk, direct lookup."
+  },
+  {
+    "question": "What happens if a company iPhone is physically damaged, and who approves a chargeable repair?",
+    "expected_document_id": "Apple_iPhone_Warranty_Repair_Replacement_Policy",
+    "answerable": true,
+    "notes": "May require more than one chunk (damage + approval)."
+  },
+  {
+    "question": "What are the employee responsibilities for a company device?",
+    "expected_document_id": "Apple_iPhone_Warranty_Repair_Replacement_Policy",
+    "answerable": true,
+    "notes": "Section-based retrieval."
+  },
+  {
+    "question": "What is the company's parental leave allowance in weeks?",
+    "expected_document_id": null,
+    "answerable": false,
+    "notes": "Not in the corpus - the assistant should abstain."
+  },
+  {
+    "question": "Can I expense a first-class flight to a conference?",
+    "expected_document_id": null,
+    "answerable": false,
+    "notes": "Similar-but-irrelevant topic - should abstain unless an expense doc is added."
+  },
+  {
+    "question": "",
+    "expected_document_id": null,
+    "answerable": false,
+    "notes": "Edge case: empty input must be rejected by the chain."
+  }
+]
