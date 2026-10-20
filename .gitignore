@@ -1,0 +1,32 @@
+# Secrets and local config
+.env
+*.pem
+*.key
+
+# Databricks local state
+.databricks/
+.bundle/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Generated artifacts: indexes, embeddings, model files
+artifacts/*
+!artifacts/.gitkeep
+*.faiss
+*.index
+*.bin
+*.safetensors
+
+# Real documents: only synthetic or approved samples belong in Git
+data/raw/
+data/sample_docs/*
+!data/sample_docs/.gitkeep
+
+# Editor
+.vscode/
+.idea/

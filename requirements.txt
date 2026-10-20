@@ -1,0 +1,6 @@
+# Local zero-cost baseline. Pin exact versions once the environment is verified.
+sentence-transformers>=2.2
+faiss-cpu>=1.7
+streamlit>=1.30
+requests>=2.31
+pytest>=7.4
