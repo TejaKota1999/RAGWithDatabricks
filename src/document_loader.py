@@ -9,49 +9,57 @@ imported lazily so plain .txt/.md works with no extra dependency.
 
 from __future__ import annotations
 
+# hashlib: content fingerprint; os: unused-but-handy path helpers; datetime: timestamp;
+# Path: a friendly way to work with file paths.
 import hashlib
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Reuse the exact same cleaning function as the notebook.
 from src.text_cleaning import clean_text
 
+# File types we know how to read.
 SUPPORTED_EXTENSIONS = ("txt", "md", "pdf", "docx")
 
 
 # COMMAND ----------
+# Read a Word document's paragraphs and tables in order (keeps tables inline).
 def _iter_docx_blocks(document):
+    # Low-level Word building blocks.
     from docx.oxml.table import CT_Tbl
     from docx.oxml.text.paragraph import CT_P
     from docx.table import Table
     from docx.text.paragraph import Paragraph
 
-    for child in document.element.body.iterchildren():
-        if isinstance(child, CT_P):
-            yield Paragraph(child, document).text
-        elif isinstance(child, CT_Tbl):
-            for row in Table(child, document).rows:
-                yield "\t".join(cell.text for cell in row.cells)
+    for child in document.element.body.iterchildren():   # walk the document body in order
+        if isinstance(child, CT_P):                       # a paragraph...
+            yield Paragraph(child, document).text          # ...yield its text
+        elif isinstance(child, CT_Tbl):                   # a table...
+            for row in Table(child, document).rows:        # ...go row by row
+                yield "\t".join(cell.text for cell in row.cells)  # join cells with tabs
 
 
 # COMMAND ----------
+# Choose the right parser for a file and return its raw text.
 def extract_text(path: Path, ext: str) -> str:
     """Extract raw text from one file. Raises on parser failure."""
-    if ext in ("txt", "md"):
+    if ext in ("txt", "md"):                               # plain text / Markdown
         return path.read_text(encoding="utf-8", errors="replace")
-    if ext == "pdf":
+    if ext == "pdf":                                       # PDF -> join all pages
         from pypdf import PdfReader
 
         reader = PdfReader(str(path))
         return "\n".join((page.extract_text() or "") for page in reader.pages)
-    if ext == "docx":
+    if ext == "docx":                                     # Word -> join all blocks
         from docx import Document
 
         return "\n".join(_iter_docx_blocks(Document(str(path))))
-    raise ValueError(f"No parser for extension '{ext}'")
+    raise ValueError(f"No parser for extension '{ext}'")  # unknown type
 
 
 # COMMAND ----------
+# Load every supported document under a folder and return cleaned records.
 def load_documents(
     directory: str,
     supported_extensions: tuple[str, ...] = SUPPORTED_EXTENSIONS,
@@ -65,32 +73,32 @@ def load_documents(
     does not abort the batch; callers can compare input vs output counts.
     """
     base = Path(directory)
-    if not base.is_dir():
+    if not base.is_dir():                                  # the folder must exist
         raise FileNotFoundError(f"Not a directory: {directory}")
 
     records: list[dict] = []
-    for path in sorted(base.rglob("*")):
-        if not path.is_file():
+    for path in sorted(base.rglob("*")):                   # every file under the folder (recursively)
+        if not path.is_file():                             # skip sub-folders
             continue
-        ext = path.suffix.lstrip(".").lower()
-        if ext not in supported_extensions:
+        ext = path.suffix.lstrip(".").lower()              # the extension, e.g. "docx"
+        if ext not in supported_extensions:                # skip types we do not handle
             continue
         try:
-            raw = extract_text(path, ext)
-        except Exception:
+            raw = extract_text(path, ext)                  # read the text
+        except Exception:                                  # log-and-skip on parser errors
             continue
-        cleaned = clean_text(raw)
-        if len(cleaned) < min_chars:
+        cleaned = clean_text(raw)                          # tidy the text
+        if len(cleaned) < min_chars:                       # skip near-empty files
             continue
-        content = path.read_bytes()
+        content = path.read_bytes()                        # raw bytes for the fingerprint
         records.append(
             {
-                "document_id": path.stem,
+                "document_id": path.stem,                  # file name without extension
                 "file_name": path.name,
                 "text": cleaned,
                 "file_type": ext,
-                "source_path": str(path),
-                "content_hash": hashlib.sha256(content).hexdigest(),
+                "source_path": str(path),                  # where it came from
+                "content_hash": hashlib.sha256(content).hexdigest(),  # change-detection fingerprint
                 "ingested_at": datetime.now(timezone.utc).isoformat(),
             }
         )
