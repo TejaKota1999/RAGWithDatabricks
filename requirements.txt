@@ -4,3 +4,6 @@ faiss-cpu>=1.7
 streamlit>=1.30
 requests>=2.31
 pytest>=7.4
+
+# Databricks workspace access (catalogs, SQL statement execution, bundles)
+databricks-sdk>=0.154
