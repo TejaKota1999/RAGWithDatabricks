@@ -1,3 +1,4 @@
+# Databricks notebook source
 """Local document loading and text extraction (zero-cost path).
 
 Mirrors the Databricks extraction notebook (Phase 2) for a local machine:
@@ -18,7 +19,7 @@ from src.text_cleaning import clean_text
 SUPPORTED_EXTENSIONS = ("txt", "md", "pdf", "docx")
 
 
-# %%
+# COMMAND ----------
 def _iter_docx_blocks(document):
     from docx.oxml.table import CT_Tbl
     from docx.oxml.text.paragraph import CT_P
@@ -33,7 +34,7 @@ def _iter_docx_blocks(document):
                 yield "\t".join(cell.text for cell in row.cells)
 
 
-# %%
+# COMMAND ----------
 def extract_text(path: Path, ext: str) -> str:
     """Extract raw text from one file. Raises on parser failure."""
     if ext in ("txt", "md"):
@@ -50,7 +51,7 @@ def extract_text(path: Path, ext: str) -> str:
     raise ValueError(f"No parser for extension '{ext}'")
 
 
-# %%
+# COMMAND ----------
 def load_documents(
     directory: str,
     supported_extensions: tuple[str, ...] = SUPPORTED_EXTENSIONS,

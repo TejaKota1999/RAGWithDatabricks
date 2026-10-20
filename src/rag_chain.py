@@ -1,3 +1,4 @@
+# Databricks notebook source
 """RAG orchestration: retrieve -> threshold -> abstain/answer -> sources.
 
 Dependencies are injected (retriever, embed function, LLM), so the chain is
@@ -23,7 +24,7 @@ class _LLM(Protocol):
 _SOURCE_FIELDS = ("chunk_id", "document_id", "section", "page_number", "source_path", "score")
 
 
-# %%
+# COMMAND ----------
 class RagChain:
     def __init__(
         self,

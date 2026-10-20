@@ -1,3 +1,4 @@
+# Databricks notebook source
 """Local vector retrieval over a FAISS index (zero-cost baseline).
 
 Pure/local: no Databricks or managed endpoint required. The retriever works on
@@ -17,7 +18,7 @@ except ImportError:  # pragma: no cover
     faiss = None
 
 
-# %%
+# COMMAND ----------
 def _to_float32(vectors: Sequence[Sequence[float]]) -> np.ndarray:
     arr = np.asarray(vectors, dtype="float32")
     if arr.ndim != 2:
@@ -25,14 +26,14 @@ def _to_float32(vectors: Sequence[Sequence[float]]) -> np.ndarray:
     return arr
 
 
-# %%
+# COMMAND ----------
 def _l2_normalize(arr: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(arr, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return arr / norms
 
 
-# %%
+# COMMAND ----------
 class FaissRetriever:
     """Cosine-similarity retriever over chunk embeddings.
 

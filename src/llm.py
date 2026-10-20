@@ -1,3 +1,4 @@
+# Databricks notebook source
 """Local LLM client via Ollama (zero-cost generation).
 
 Talks to a locally running Ollama server over its HTTP API. No paid API is used.
@@ -15,12 +16,12 @@ DEFAULT_MODEL = "llama3.2:3b"
 DEFAULT_HOST = "http://localhost:11434"
 
 
-# %%
+# COMMAND ----------
 class LLMUnavailableError(RuntimeError):
     """Raised when the local LLM server cannot be reached."""
 
 
-# %%
+# COMMAND ----------
 class OllamaClient:
     """Minimal client for Ollama's /api/generate endpoint."""
 

@@ -1,3 +1,4 @@
+# Databricks notebook source
 """Local embedding adapter (sentence-transformers).
 
 The SAME model must embed both document chunks and questions. Kept separate
@@ -11,7 +12,7 @@ from typing import Sequence
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
-# %%
+# COMMAND ----------
 class LocalEmbedder:
     """Lazy wrapper around a sentence-transformers model."""
 

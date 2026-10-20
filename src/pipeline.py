@@ -1,3 +1,4 @@
+# Databricks notebook source
 """Build a local FAISS retriever from a folder of documents (zero-cost path).
 
 Ties together: load_documents -> build_chunks -> embed -> FaissRetriever. Runs
@@ -12,7 +13,7 @@ from src.embedder import LocalEmbedder
 from src.retriever import FaissRetriever
 
 
-# %%
+# COMMAND ----------
 def build_retriever(
     docs_dir: str,
     embedder: LocalEmbedder | None = None,

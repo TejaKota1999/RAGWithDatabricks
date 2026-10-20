@@ -1,3 +1,4 @@
+# Databricks notebook source
 """Text cleaning shared by the extraction notebook (Phase 2) and tests.
 
 Normalizes whitespace only. It must NOT remove meaningful content: headings,
@@ -9,7 +10,7 @@ from __future__ import annotations
 import re
 
 
-# %%
+# COMMAND ----------
 def clean_text(raw: str) -> str:
     """Normalize whitespace without removing meaningful content."""
     text = raw.replace("\x00", "")

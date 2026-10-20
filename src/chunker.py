@@ -1,3 +1,4 @@
+# Databricks notebook source
 """Chunking logic shared by the chunking notebook (Phase 3) and tests.
 
 Paragraph-aware packing with a configurable size and overlap, stable chunk IDs,
@@ -15,7 +16,7 @@ from typing import Iterable
 _HEADING_RE = re.compile(r"^\s*(#{1,6}\s+.+|\d+(?:\.\d+)*\.?\s+\S.+)\s*$")
 
 
-# %%
+# COMMAND ----------
 def chunk_document(text: str, size: int, overlap: int) -> list[str]:
     """Split one document's text into overlapping, paragraph-aware chunks.
 
@@ -51,7 +52,7 @@ def chunk_document(text: str, size: int, overlap: int) -> list[str]:
     return chunks
 
 
-# %%
+# COMMAND ----------
 def detect_section(chunk: str, carried: str | None) -> str | None:
     """Return the first heading inside the chunk, else the carried section."""
     for line in chunk.splitlines():
@@ -60,7 +61,7 @@ def detect_section(chunk: str, carried: str | None) -> str | None:
     return carried
 
 
-# %%
+# COMMAND ----------
 def build_chunks(
     records: Iterable[dict],
     chunk_size: int,
