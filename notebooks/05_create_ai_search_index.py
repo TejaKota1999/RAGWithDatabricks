@@ -125,25 +125,24 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Cell 6 - Install the Vector Search client
-# MAGIC Only needed when actually creating/querying. In-process pip, no restart.
+# MAGIC ## Cell 6 - Vector Search client (SDK, pre-installed)
+# MAGIC Uses the `databricks-sdk` already on the serverless runtime, so there is
+# MAGIC **no pip install** and no dependency/protobuf conflict. Only the sample
+# MAGIC query (Cell 9) needs an extra library.
 
 # COMMAND ----------
 
-if CREATE_RESOURCES:
-    import importlib
-    import subprocess
-    import sys
+from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.vectorsearch import (
+    DeltaSyncVectorIndexSpecRequest,
+    EmbeddingVectorColumn,
+    EndpointType,
+    PipelineType,
+    VectorIndexType,
+)
 
-    try:
-        importlib.import_module("databricks.vector_search")
-        print("ready: databricks-vectorsearch")
-    except ModuleNotFoundError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "databricks-vectorsearch==0.56"])
-        importlib.invalidate_caches()
-        print("installed databricks-vectorsearch")
-else:
-    print("create_resources=false -> skipping client install")
+w = WorkspaceClient()
+print("WorkspaceClient ready (SDK vector search API).")
 
 # COMMAND ----------
 
@@ -154,55 +153,81 @@ else:
 
 # COMMAND ----------
 
+
+def _endpoint_exists(name: str) -> bool:
+    try:
+        w.vector_search_endpoints.get_endpoint(name)
+        return True
+    except Exception:
+        return False
+
+
 if not CREATE_RESOURCES:
     print("create_resources=false -> NOT creating an endpoint. Set it to 'true' to proceed.")
+elif _endpoint_exists(ENDPOINT_NAME):
+    print(f"endpoint '{ENDPOINT_NAME}' already exists")
 else:
-    from databricks.vector_search.client import VectorSearchClient
-
-    vsc = VectorSearchClient(disable_notice=True)
-    existing = [e["name"] for e in vsc.list_endpoints().get("endpoints", [])]
-    if ENDPOINT_NAME in existing:
-        print(f"endpoint '{ENDPOINT_NAME}' already exists")
-    else:
-        print(f"creating endpoint '{ENDPOINT_NAME}' ({ENDPOINT_TYPE}) - waits until online ...")
-        vsc.create_endpoint_and_wait(name=ENDPOINT_NAME, endpoint_type=ENDPOINT_TYPE)
-        print("endpoint online")
+    print(f"creating endpoint '{ENDPOINT_NAME}' ({ENDPOINT_TYPE}) - waits until online ...")
+    w.vector_search_endpoints.create_endpoint_and_wait(
+        name=ENDPOINT_NAME,
+        endpoint_type=EndpointType(ENDPOINT_TYPE),
+    )
+    print("endpoint online")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Cell 8 - Create the Delta Sync index (self-managed embeddings) - guarded
+# MAGIC No `create_index_and_wait` exists in the SDK, so we poll `get_index`.
 
 # COMMAND ----------
 
+import time
+
+
+def _index_exists(name: str) -> bool:
+    try:
+        w.vector_search_indexes.get_index(name)
+        return True
+    except Exception:
+        return False
+
+
 if not CREATE_RESOURCES:
     print("create_resources=false -> NOT creating an index.")
+elif _index_exists(INDEX_FQN):
+    print(f"index '{INDEX_FQN}' already exists")
 else:
-    from databricks.vector_search.client import VectorSearchClient
-
-    vsc = VectorSearchClient(disable_notice=True)
-    existing_idx = [i["name"] for i in vsc.list_indexes(ENDPOINT_NAME).get("vector_indexes", [])]
-    if INDEX_FQN in existing_idx:
-        print(f"index '{INDEX_FQN}' already exists")
+    print(f"creating Delta Sync index '{INDEX_FQN}' ...")
+    w.vector_search_indexes.create_index(
+        name=INDEX_FQN,
+        endpoint_name=ENDPOINT_NAME,
+        primary_key=PRIMARY_KEY,
+        index_type=VectorIndexType.DELTA_SYNC,
+        delta_sync_index_spec=DeltaSyncVectorIndexSpecRequest(
+            source_table=SOURCE_FQN,
+            pipeline_type=PipelineType(PIPELINE_TYPE),
+            embedding_vector_columns=[
+                EmbeddingVectorColumn(name=EMBEDDING_COLUMN, embedding_dimension=EMBEDDING_DIM)
+            ],
+        ),
+    )
+    print("waiting for the index to become ready (polling) ...")
+    for _ in range(90):  # up to ~15 min
+        status = w.vector_search_indexes.get_index(INDEX_FQN).status
+        if status and status.ready:
+            print("index ready")
+            break
+        time.sleep(10)
     else:
-        print(f"creating Delta Sync index '{INDEX_FQN}' - waits until ready ...")
-        vsc.create_delta_sync_index_and_wait(
-            endpoint_name=ENDPOINT_NAME,
-            index_name=INDEX_FQN,
-            source_table_name=SOURCE_FQN,
-            primary_key=PRIMARY_KEY,
-            pipeline_type=PIPELINE_TYPE,
-            embedding_vector_column=EMBEDDING_COLUMN,
-            embedding_dimension=EMBEDDING_DIM,
-        )
-        print("index ready")
+        print("index not ready yet; check status later with get-index.")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Cell 9 - Smoke-test the index with a self-embedded query - guarded
 # MAGIC Embeds a sample question with the SAME model used in Phase 5 and runs a
-# MAGIC similarity search. Confirms the index returns grounded chunks.
+# MAGIC similarity search via the SDK. Confirms the index returns grounded chunks.
 
 # COMMAND ----------
 
@@ -219,7 +244,6 @@ else:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "sentence-transformers==3.3.1"])
         importlib.invalidate_caches()
 
-    from databricks.vector_search.client import VectorSearchClient
     from sentence_transformers import SentenceTransformer
 
     # Must match the model used to build the embeddings in Phase 5.
@@ -227,12 +251,12 @@ else:
     question = "What is the laptop or iPhone warranty and repair policy?"
     qvec = model.encode([question], normalize_embeddings=True)[0].tolist()
 
-    vsc = VectorSearchClient(disable_notice=True)
-    index = vsc.get_index(endpoint_name=ENDPOINT_NAME, index_name=INDEX_FQN)
-    res = index.similarity_search(
-        query_vector=qvec,
+    res = w.vector_search_indexes.query_index(
+        index_name=INDEX_FQN,
         columns=["chunk_id", "section", "chunk_text"],
+        query_vector=qvec,
         num_results=3,
     )
-    for row in res.get("result", {}).get("data_array", []):
+    data = res.result.data_array if res.result else []
+    for row in data:
         print(row[:2], "| score:", row[-1])
