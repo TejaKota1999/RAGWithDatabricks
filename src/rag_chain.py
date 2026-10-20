@@ -23,6 +23,7 @@ class _LLM(Protocol):
 _SOURCE_FIELDS = ("chunk_id", "document_id", "section", "page_number", "source_path", "score")
 
 
+# %%
 class RagChain:
     def __init__(
         self,

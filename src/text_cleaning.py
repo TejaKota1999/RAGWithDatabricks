@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 
+# %%
 def clean_text(raw: str) -> str:
     """Normalize whitespace without removing meaningful content."""
     text = raw.replace("\x00", "")

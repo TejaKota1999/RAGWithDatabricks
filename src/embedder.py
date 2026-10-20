@@ -11,6 +11,7 @@ from typing import Sequence
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
+# %%
 class LocalEmbedder:
     """Lazy wrapper around a sentence-transformers model."""
 

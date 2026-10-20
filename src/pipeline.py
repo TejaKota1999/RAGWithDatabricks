@@ -12,6 +12,7 @@ from src.embedder import LocalEmbedder
 from src.retriever import FaissRetriever
 
 
+# %%
 def build_retriever(
     docs_dir: str,
     embedder: LocalEmbedder | None = None,

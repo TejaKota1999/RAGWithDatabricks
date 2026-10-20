@@ -22,6 +22,7 @@ SYSTEM_PROMPT = (
 ABSTAIN_MESSAGE = "I cannot answer that from the available documents."
 
 
+# %%
 def format_context(chunks: list[dict], max_chars: int | None = None) -> str:
     """Render retrieved chunks as a numbered, source-tagged context block."""
     parts = []
@@ -38,6 +39,7 @@ def format_context(chunks: list[dict], max_chars: int | None = None) -> str:
     return "\n\n".join(parts)
 
 
+# %%
 def build_user_prompt(question: str, chunks: list[dict], max_context_chars: int | None = 6000) -> str:
     """Build the user prompt: bounded context followed by the question."""
     context = format_context(chunks, max_chars=max_context_chars)

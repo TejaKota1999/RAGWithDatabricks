@@ -17,6 +17,7 @@ except ImportError:  # pragma: no cover
     faiss = None
 
 
+# %%
 def _to_float32(vectors: Sequence[Sequence[float]]) -> np.ndarray:
     arr = np.asarray(vectors, dtype="float32")
     if arr.ndim != 2:
@@ -24,12 +25,14 @@ def _to_float32(vectors: Sequence[Sequence[float]]) -> np.ndarray:
     return arr
 
 
+# %%
 def _l2_normalize(arr: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(arr, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return arr / norms
 
 
+# %%
 class FaissRetriever:
     """Cosine-similarity retriever over chunk embeddings.
 

@@ -16,6 +16,7 @@ def _tokens(text: str) -> set[str]:
     return set(_WORD_RE.findall((text or "").lower()))
 
 
+# %%
 def recall_at_k(retrieved_ids: list[str], relevant_ids: Iterable[str], k: int) -> float:
     """Fraction of relevant ids found within the top-k retrieved ids."""
     relevant = set(relevant_ids)
@@ -25,6 +26,7 @@ def recall_at_k(retrieved_ids: list[str], relevant_ids: Iterable[str], k: int) -
     return len(relevant & topk) / len(relevant)
 
 
+# %%
 def groundedness(answer: str, chunks: list[dict], threshold: float = 0.5) -> float:
     """Share of answer content words that also appear in the retrieved context.
 
@@ -43,10 +45,12 @@ def groundedness(answer: str, chunks: list[dict], threshold: float = 0.5) -> flo
     return len(overlap) / len(answer_tokens)
 
 
+# %%
 def is_grounded(answer: str, chunks: list[dict], threshold: float = 0.5) -> bool:
     return groundedness(answer, chunks) >= threshold
 
 
+# %%
 def citation_precision(cited_ids: Iterable[str], retrieved_ids: Iterable[str]) -> float:
     """Fraction of cited ids that correspond to actually retrieved chunks."""
     cited = list(cited_ids)
@@ -57,6 +61,7 @@ def citation_precision(cited_ids: Iterable[str], retrieved_ids: Iterable[str]) -
     return valid / len(cited)
 
 
+# %%
 def extract_citations(answer: str) -> list[str]:
     """Pull [source-id] style citations out of an answer string."""
     return re.findall(r"\[([^\[\]]+)\]", answer or "")

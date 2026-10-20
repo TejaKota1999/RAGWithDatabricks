@@ -15,10 +15,12 @@ DEFAULT_MODEL = "llama3.2:3b"
 DEFAULT_HOST = "http://localhost:11434"
 
 
+# %%
 class LLMUnavailableError(RuntimeError):
     """Raised when the local LLM server cannot be reached."""
 
 
+# %%
 class OllamaClient:
     """Minimal client for Ollama's /api/generate endpoint."""
 

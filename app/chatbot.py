@@ -27,10 +27,12 @@ from src.llm import DEFAULT_MODEL, LLMUnavailableError, OllamaClient
 from src.pipeline import build_retriever
 from src.rag_chain import RagChain
 
+# %%
 st.set_page_config(page_title="RAG POC", page_icon="chat")
 st.title("Company Knowledge Assistant")
 st.caption("Local, zero-cost RAG over your documents. Answers are grounded in retrieved text.")
 
+# %%
 with st.sidebar:
     st.header("Settings")
     docs_dir = st.text_input("Documents folder", value="data/sample_docs")
@@ -40,6 +42,7 @@ with st.sidebar:
     rebuild = st.button("Rebuild index")
 
 
+# %%
 @st.cache_resource(show_spinner="Building local index ...")
 def _load_retriever(folder: str):
     embedder = LocalEmbedder()
@@ -47,6 +50,7 @@ def _load_retriever(folder: str):
     return embedder, retriever, len(chunks)
 
 
+# %%
 if rebuild:
     _load_retriever.clear()
 
@@ -57,6 +61,7 @@ except Exception as exc:
     st.error(f"Could not build the index from '{docs_dir}': {exc}")
     st.stop()
 
+# %%
 chain = RagChain(
     retriever=retriever,
     embed_fn=embedder.encode_one,
@@ -65,6 +70,7 @@ chain = RagChain(
     min_score=min_score,
 )
 
+# %%
 question = st.chat_input("Ask a question about your documents")
 if question:
     st.chat_message("user").write(question)

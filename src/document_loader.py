@@ -18,6 +18,7 @@ from src.text_cleaning import clean_text
 SUPPORTED_EXTENSIONS = ("txt", "md", "pdf", "docx")
 
 
+# %%
 def _iter_docx_blocks(document):
     from docx.oxml.table import CT_Tbl
     from docx.oxml.text.paragraph import CT_P
@@ -32,6 +33,7 @@ def _iter_docx_blocks(document):
                 yield "\t".join(cell.text for cell in row.cells)
 
 
+# %%
 def extract_text(path: Path, ext: str) -> str:
     """Extract raw text from one file. Raises on parser failure."""
     if ext in ("txt", "md"):
@@ -48,6 +50,7 @@ def extract_text(path: Path, ext: str) -> str:
     raise ValueError(f"No parser for extension '{ext}'")
 
 
+# %%
 def load_documents(
     directory: str,
     supported_extensions: tuple[str, ...] = SUPPORTED_EXTENSIONS,

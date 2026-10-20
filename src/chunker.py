@@ -15,6 +15,7 @@ from typing import Iterable
 _HEADING_RE = re.compile(r"^\s*(#{1,6}\s+.+|\d+(?:\.\d+)*\.?\s+\S.+)\s*$")
 
 
+# %%
 def chunk_document(text: str, size: int, overlap: int) -> list[str]:
     """Split one document's text into overlapping, paragraph-aware chunks.
 
@@ -50,6 +51,7 @@ def chunk_document(text: str, size: int, overlap: int) -> list[str]:
     return chunks
 
 
+# %%
 def detect_section(chunk: str, carried: str | None) -> str | None:
     """Return the first heading inside the chunk, else the carried section."""
     for line in chunk.splitlines():
@@ -58,6 +60,7 @@ def detect_section(chunk: str, carried: str | None) -> str | None:
     return carried
 
 
+# %%
 def build_chunks(
     records: Iterable[dict],
     chunk_size: int,
