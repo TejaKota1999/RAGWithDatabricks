@@ -1,0 +1,4 @@
+# Databricks Asset Bundle placeholder. Only needed for Databricks deployment (Phase 11).
+# The local POC runs without this file. Do not put tokens or secrets here.
+bundle:
+  name: rag-poc
