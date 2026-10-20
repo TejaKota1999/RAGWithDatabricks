@@ -246,6 +246,15 @@ else:
 
     from sentence_transformers import SentenceTransformer
 
+    # Delta Sync runs an initial sync after creation; wait until the index is
+    # ready before querying (avoids "Vector index ... is not ready").
+    print("waiting for the index to be queryable ...")
+    for _ in range(90):  # up to ~15 min
+        status = w.vector_search_indexes.get_index(INDEX_FQN).status
+        if status and status.ready:
+            break
+        time.sleep(10)
+
     # Must match the model used to build the embeddings in Phase 5.
     model = SentenceTransformer(QUERY_MODEL)
     question = "What is the laptop or iPhone warranty and repair policy?"
