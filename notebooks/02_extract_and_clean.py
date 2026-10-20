@@ -67,14 +67,40 @@ print("SAVE_CLEANED        :", SAVE_CLEANED, "->", CLEANED_FQN, f"({WRITE_MODE})
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Cell 3 - (Optional) Install binary-format parsers
-# MAGIC Run this cell **only if** you are ingesting `.pdf` or `.docx` files.
-# MAGIC `.txt` / `.md` need no extra library. `%pip install` restarts the Python
-# MAGIC process, so re-run cells 1-2 afterwards.
+# MAGIC ## Cell 3 - Ensure the needed parsers are installed
+# MAGIC Dynamic: installs only the libraries required by `supported_extensions`
+# MAGIC (`pdf` -> pypdf, `docx` -> python-docx). Uses in-process pip, so **no
+# MAGIC Python restart** and no need to re-run earlier cells. Safe to re-run.
 
 # COMMAND ----------
 
-# MAGIC %pip install pypdf==5.1.0 python-docx==1.1.2
+import importlib
+import subprocess
+import sys
+
+# Map a file extension to (pip package spec, importable module name).
+PARSER_DEPS = {
+    "pdf": ("pypdf==5.1.0", "pypdf"),
+    "docx": ("python-docx==1.1.2", "docx"),
+}
+
+
+def _ensure(pip_spec: str, module_name: str) -> None:
+    try:
+        importlib.import_module(module_name)
+        print(f"ready: {module_name} (already installed)")
+    except ModuleNotFoundError:
+        print(f"installing {pip_spec} ...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", pip_spec])
+        importlib.invalidate_caches()
+        importlib.import_module(module_name)
+        print(f"ready: {module_name}")
+
+
+for _ext in SUPPORTED_EXTENSIONS:
+    if _ext in PARSER_DEPS:
+        _ensure(*PARSER_DEPS[_ext])
+print("Parser dependencies satisfied.")
 
 # COMMAND ----------
 
