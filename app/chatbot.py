@@ -70,6 +70,8 @@ with st.sidebar:
     top_k = st.slider("Top-k chunks", 1, 10, 5)
     # Minimum similarity to treat a chunk as relevant (0.0 to 1.0, default 0.3).
     min_score = st.slider("Min relevance score", 0.0, 1.0, 0.3, 0.05)
+    # Button to wipe the conversation transcript and start fresh.
+    clear = st.button("Clear chat")
     if PROFILE:
         st.caption(f"Local run using profile: `{PROFILE}`")
 
@@ -97,10 +99,50 @@ except Exception as exc:
     st.stop()
 
 # COMMAND ----------
+# Keep the whole conversation in st.session_state so it survives each rerun.
+# (Streamlit re-runs the script top-to-bottom on every interaction; without this
+# the previous questions and answers would disappear.)
+if "messages" not in st.session_state:
+    st.session_state.messages = []            # each item: {role, content, sources, abstained}
+# The "Clear chat" button empties the transcript.
+if clear:
+    st.session_state.messages = []
+
+
+# Helper: render the sources of one assistant turn inside a collapsible section.
+def _render_sources(sources):
+    if not sources:
+        return
+    with st.expander(f"Sources ({len(sources)})"):
+        for s in sources:
+            score = s.get("score")
+            # Format the score to 3 decimals if it is a number, else "n/a".
+            score_str = f"{score:.3f}" if isinstance(score, (int, float)) else "n/a"
+            st.markdown(
+                f"- `{s.get('chunk_id', '?')}` "
+                f"(section: {s.get('section') or 'n/a'}, score: {score_str})  \n"
+                f"  {s.get('source_path', '')}"
+            )
+
+
+# COMMAND ----------
+# Re-draw the full transcript so far (every past question and answer stays visible).
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]):
+        st.write(m["content"])
+        if m["role"] == "assistant":
+            if m.get("abstained"):
+                st.info("No sufficiently relevant evidence was found, so the assistant abstained.")
+            _render_sources(m.get("sources", []))
+
+# COMMAND ----------
 # The chat input box at the bottom of the page.
 question = st.chat_input("Ask a question about your documents")
 if question:                                   # runs when the user submits a question
-    st.chat_message("user").write(question)    # show the user's message
+    # Save + show the user's message.
+    st.session_state.messages.append({"role": "user", "content": question})
+    st.chat_message("user").write(question)
+
     with st.chat_message("assistant"):         # start the assistant's reply bubble
         with st.spinner("Retrieving and generating ..."):   # loading indicator
             try:
@@ -112,17 +154,14 @@ if question:                                   # runs when the user submits a qu
         st.write(result["answer"])             # show the answer text
         if result.get("abstained"):            # if it abstained, say so clearly
             st.info("No sufficiently relevant evidence was found, so the assistant abstained.")
+        _render_sources(result.get("sources", []))
 
-        # Show the sources the answer was based on, inside a collapsible section.
-        sources = result.get("sources", [])
-        if sources:
-            with st.expander(f"Sources ({len(sources)})"):
-                for s in sources:
-                    score = s.get("score")
-                    # Format the score to 3 decimals if it is a number, else "n/a".
-                    score_str = f"{score:.3f}" if isinstance(score, (int, float)) else "n/a"
-                    st.markdown(
-                        f"- `{s.get('chunk_id', '?')}` "
-                        f"(section: {s.get('section') or 'n/a'}, score: {score_str})  \n"
-                        f"  {s.get('source_path', '')}"
-                    )
+    # Save the assistant's answer (with its sources) so it persists on the next rerun.
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": result["answer"],
+            "sources": result.get("sources", []),
+            "abstained": result.get("abstained", False),
+        }
+    )
