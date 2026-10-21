@@ -1,0 +1,26 @@
+# Databricks Apps runtime config for the RAG chatbot.
+# The app runs Streamlit and talks to Databricks serving endpoints + Vector Search
+# using the App's own identity (service principal) -- no profile or token needed.
+#
+# This file lives at the source-code root so `app/chatbot.py` can import `src/`.
+# Dependencies come from requirements.txt at this same root.
+
+command:
+  - streamlit
+  - run
+  - app/chatbot.py
+  - --server.port
+  - "8000"
+  - --server.address
+  - "0.0.0.0"
+  - --server.headless
+  - "true"
+
+env:
+  # Which Vector Search index and serving endpoints the app should use.
+  - name: RAG_INDEX_NAME
+    value: "databricks_rag_dev.rag.document_chunks_index"
+  - name: RAG_EMBED_ENDPOINT
+    value: "databricks-qwen3-embedding-0-6b"
+  - name: RAG_CHAT_ENDPOINT
+    value: "databricks-meta-llama-3-1-8b-instruct"

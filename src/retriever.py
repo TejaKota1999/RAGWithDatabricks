@@ -1,9 +1,9 @@
 # Databricks notebook source
-"""Local vector retrieval over a FAISS index (zero-cost baseline).
+"""Retrieval adapters: Databricks Vector Search (default) + local FAISS fallback.
 
-Pure/local: no Databricks or managed endpoint required. The retriever works on
-numpy vectors and chunk metadata, so embedding is decoupled and the retrieval
-logic is unit-testable without downloading a model.
+The default path queries a Databricks Vector Search index in the workspace. A
+local FAISS retriever is kept only as an optional offline fallback and for unit
+tests (it needs no managed service).
 
 Plain English: given a question vector, this finds the chunk vectors closest to
 it (most similar in meaning) and returns those chunks with their metadata.
@@ -14,38 +14,100 @@ from __future__ import annotations
 # "Sequence" is just a type hint meaning "a list/tuple-like of items".
 from typing import Sequence
 
-# numpy handles the number arrays (the vectors) efficiently.
+# numpy is used only by the local FAISS fallback below.
 import numpy as np
 
-# FAISS is the local similarity-search library. If it is missing we set it to
-# None here and raise a clear error later only if someone tries to use it.
-try:
-    import faiss
-except ImportError:  # pragma: no cover
-    faiss = None
+# The default columns returned with each retrieved chunk (source traceability).
+DEFAULT_COLUMNS = ("chunk_id", "document_id", "chunk_text", "section", "page_number", "source_path")
+
+
+# COMMAND ----------
+# DEFAULT adapter: query a Databricks Vector Search index.
+class VectorSearchRetriever:
+    """Cosine-similarity retriever backed by a Databricks Vector Search index.
+
+    Keeps the same ``search(query_vector, top_k, min_score)`` interface as the
+    local FAISS retriever so the RAG chain does not change.
+    """
+
+    # Remember which index to query, which columns to return, and how to auth.
+    def __init__(
+        self,
+        index_name: str,
+        columns: Sequence[str] = DEFAULT_COLUMNS,
+        profile: str | None = None,
+    ):
+        self.index_name = index_name     # full name: catalog.schema.index
+        self.columns = list(columns)     # metadata columns to return per hit
+        self.profile = profile           # optional CLI profile (None in app/notebook)
+        self._client = None              # the WorkspaceClient, created lazily
+
+    # Create (once) the Databricks client used to query the index.
+    def _ws(self):
+        if self._client is None:
+            from src.databricks_client import get_workspace_client
+
+            self._client = get_workspace_client(self.profile)
+        return self._client
+
+    # The main method: find the chunks most similar to a question vector.
+    def search(self, query_vector, top_k: int = 5, min_score: float | None = None) -> list[dict]:
+        """Return the top-k records most similar to the query vector.
+
+        Each result is a dict of the requested columns plus a ``score``. Results
+        below ``min_score`` are dropped, so an irrelevant query can return ``[]``
+        (the caller then abstains).
+        """
+        if top_k <= 0:
+            raise ValueError("top_k must be > 0")
+
+        # Ask Vector Search for the nearest rows to this query vector.
+        resp = self._ws().vector_search_indexes.query_index(
+            index_name=self.index_name,
+            columns=self.columns,
+            query_vector=[float(x) for x in query_vector],
+            num_results=top_k,
+        )
+
+        # The response lists the column order, and rows of values (score appended last).
+        col_names = [c.name for c in resp.manifest.columns] if resp.manifest else list(self.columns)
+        rows = resp.result.data_array if (resp.result and resp.result.data_array) else []
+
+        results: list[dict] = []
+        for row in rows:
+            # Vector Search appends the similarity score as the final value in each row.
+            score = float(row[-1]) if len(row) > len(self.columns) else None
+            if min_score is not None and score is not None and score < min_score:
+                continue  # drop weak matches
+            # Pair each returned column name with its value for this row.
+            record = {name: row[i] for i, name in enumerate(col_names) if i < len(self.columns)}
+            record["score"] = score
+            results.append(record)
+        return results  # may be empty -> caller abstains
 
 
 # COMMAND ----------
 # Convert a list of vectors into a 2D float32 numpy array (FAISS needs float32).
 def _to_float32(vectors: Sequence[Sequence[float]]) -> np.ndarray:
-    arr = np.asarray(vectors, dtype="float32")   # make a float32 array
-    if arr.ndim != 2:                             # must be a grid: rows x columns
+    arr = np.asarray(vectors, dtype="float32")
+    if arr.ndim != 2:
         raise ValueError("vectors must be a 2D array (n, dim)")
     return arr
 
 
-# COMMAND ----------
 # Scale each vector to length 1 so that "inner product" equals "cosine similarity".
 def _l2_normalize(arr: np.ndarray) -> np.ndarray:
-    norms = np.linalg.norm(arr, axis=1, keepdims=True)  # length of each row vector
-    norms[norms == 0] = 1.0                             # avoid dividing by zero
-    return arr / norms                                  # divide each vector by its length
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return arr / norms
 
 
 # COMMAND ----------
-# The retriever: builds a FAISS index from chunk vectors and searches it.
+# OPTIONAL FALLBACK: local FAISS retriever (offline only + unit tests).
 class FaissRetriever:
-    """Cosine-similarity retriever over chunk embeddings.
+    """Cosine-similarity retriever over chunk embeddings held in a local FAISS index.
+
+    NOT the default. Used for offline demos and unit tests (no managed service).
 
     Parameters
     ----------
@@ -57,18 +119,20 @@ class FaissRetriever:
 
     # Runs once when you create the retriever; it builds the search index.
     def __init__(self, vectors, records: list[dict], normalize: bool = True):
-        if faiss is None:  # pragma: no cover
-            raise ImportError("faiss is not installed. pip install faiss-cpu")
-        arr = _to_float32(vectors)                        # tidy the vectors
-        if len(records) != arr.shape[0]:                  # one record per vector
+        try:
+            import faiss
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError("faiss is not installed. pip install faiss-cpu") from exc
+        arr = _to_float32(vectors)
+        if len(records) != arr.shape[0]:
             raise ValueError("records length must match number of vectors")
-        self.records = list(records)                      # keep the chunk metadata
-        self.normalize = normalize                        # remember the setting
-        self.dim = arr.shape[1]                           # the vector length (e.g. 384)
+        self.records = list(records)
+        self.normalize = normalize
+        self.dim = arr.shape[1]
         if normalize:
-            arr = _l2_normalize(arr)                       # unit-normalize for cosine
-        self._index = faiss.IndexFlatIP(self.dim)          # an inner-product index
-        self._index.add(arr)                               # load all chunk vectors into it
+            arr = _l2_normalize(arr)
+        self._index = faiss.IndexFlatIP(self.dim)
+        self._index.add(arr)
 
     # Lets you call len(retriever) to get how many chunks it holds.
     def __len__(self) -> int:
@@ -76,29 +140,23 @@ class FaissRetriever:
 
     # The main method: find the chunks most similar to a question vector.
     def search(self, query_vector, top_k: int = 5, min_score: float | None = None) -> list[dict]:
-        """Return the top-k records most similar to the query.
-
-        Each result is a copy of the record plus a ``score``. Results below
-        ``min_score`` are dropped, so an irrelevant query can return ``[]``
-        (the caller then abstains).
-        """
-        if top_k <= 0:                                    # must ask for at least 1 result
+        """Return the top-k records most similar to the query (may be empty)."""
+        if top_k <= 0:
             raise ValueError("top_k must be > 0")
-        q = _to_float32([list(query_vector)])             # shape the query as a 1-row array
-        if q.shape[1] != self.dim:                        # query length must match the index
+        q = _to_float32([list(query_vector)])
+        if q.shape[1] != self.dim:
             raise ValueError(f"query dim {q.shape[1]} != index dim {self.dim}")
         if self.normalize:
-            q = _l2_normalize(q)                           # normalize the query too
-        k = min(top_k, len(self.records))                 # don't ask for more than we have
-        scores, idxs = self._index.search(q, k)           # FAISS returns scores and row indexes
+            q = _l2_normalize(q)
+        k = min(top_k, len(self.records))
+        scores, idxs = self._index.search(q, k)
         results: list[dict] = []
-        # Pair each returned score with the row index it refers to.
         for score, idx in zip(scores[0], idxs[0]):
-            if idx < 0:                                    # FAISS uses -1 for "no result"
+            if idx < 0:
                 continue
-            if min_score is not None and float(score) < min_score:  # drop weak matches
+            if min_score is not None and float(score) < min_score:
                 continue
-            hit = dict(self.records[idx])                 # copy that chunk's metadata
-            hit["score"] = float(score)                   # attach its similarity score
+            hit = dict(self.records[idx])
+            hit["score"] = float(score)
             results.append(hit)
-        return results                                     # may be empty -> caller abstains
+        return results

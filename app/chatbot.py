@@ -1,92 +1,100 @@
-# Databricks notebook source
-"""Local Streamlit chat UI for the RAG POC (zero-cost baseline).
+"""Streamlit chat UI for the Databricks RAG POC.
 
-Builds a local FAISS retriever from a documents folder and answers questions
-with a local Ollama model, showing source references and abstaining when the
-evidence is weak.
+Runs as a Databricks App (default) or locally. Either way, ALL models and
+retrieval run on Databricks Free Edition:
+  - embeddings  : databricks-qwen3-embedding-0-6b  (serving endpoint)
+  - retrieval   : Databricks Vector Search index
+  - generation  : databricks-meta-llama-3-1-8b-instruct  (serving endpoint)
 
-Run:
+No local model, FAISS, or Ollama is used.
+
+Run as a Databricks App:
+    databricks apps deploy ... (see README); auth is the app's service principal.
+
+Run locally (reads your CLI profile):
+    export DATABRICKS_CONFIG_PROFILE=sairam
     streamlit run app/chatbot.py
 
-Prerequisites (local, zero-cost):
-    - Documents in data/sample_docs/ (.txt, .md, .pdf, .docx)
-    - Ollama running locally with a model pulled, e.g. `ollama pull llama3.2:3b`
-
-Note: this is a Streamlit web app, so run it with `streamlit run` (not cell by
-cell). The `# COMMAND ----------` markers just make the sections easy to read.
+Configuration comes from environment variables (with sensible defaults):
+    RAG_INDEX_NAME        full Vector Search index name
+    RAG_EMBED_ENDPOINT    embedding serving endpoint
+    RAG_CHAT_ENDPOINT     chat serving endpoint
+    DATABRICKS_CONFIG_PROFILE  CLI profile for LOCAL runs (unset inside an App)
 """
 
 from __future__ import annotations
 
-# os/sys are used to make the `src` package importable when launched by Streamlit.
+# os/sys: read config from the environment and make `src` importable.
 import os
 import sys
 
 # Add the project root to Python's import path so `from src...` works.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# Streamlit builds the web UI (text boxes, chat, buttons) from simple Python calls.
+# Streamlit builds the web UI from simple Python calls.
 import streamlit as st
 
-# Our own building blocks.
-from src.embedder import LocalEmbedder
-from src.llm import DEFAULT_MODEL, LLMUnavailableError, OllamaClient
-from src.pipeline import build_retriever
+# Our building blocks (all Databricks-backed by default).
+from src.embedder import DEFAULT_ENDPOINT as DEFAULT_EMBED_ENDPOINT
+from src.embedder import DatabricksEmbedder
+from src.llm import DEFAULT_ENDPOINT as DEFAULT_CHAT_ENDPOINT
+from src.llm import DatabricksChatClient, LLMUnavailableError
 from src.rag_chain import RagChain
+from src.retriever import VectorSearchRetriever
+
+# COMMAND ----------
+# Read configuration from environment variables, with defaults for this project.
+DEFAULT_INDEX = os.environ.get("RAG_INDEX_NAME", "databricks_rag_dev.rag.document_chunks_index")
+EMBED_ENDPOINT = os.environ.get("RAG_EMBED_ENDPOINT", DEFAULT_EMBED_ENDPOINT)
+CHAT_ENDPOINT = os.environ.get("RAG_CHAT_ENDPOINT", DEFAULT_CHAT_ENDPOINT)
+# Inside a Databricks App this is unset (the App's identity is used automatically);
+# for LOCAL runs, set DATABRICKS_CONFIG_PROFILE (e.g. "sairam").
+PROFILE = os.environ.get("DATABRICKS_CONFIG_PROFILE")
 
 # COMMAND ----------
 # Page setup: browser tab title/icon, the on-page title, and a caption.
 st.set_page_config(page_title="RAG POC", page_icon="chat")
 st.title("Company Knowledge Assistant")
-st.caption("Local, zero-cost RAG over your documents. Answers are grounded in retrieved text.")
+st.caption("RAG on Databricks Free Edition. Answers are grounded in retrieved documents.")
 
 # COMMAND ----------
 # The left sidebar holds the settings the user can change.
 with st.sidebar:
     st.header("Settings")
-    # Which folder of documents to index.
-    docs_dir = st.text_input("Documents folder", value="data/sample_docs")
-    # Which local Ollama model to use for generating answers.
-    model_name = st.text_input("Ollama model", value=DEFAULT_MODEL)
+    # Which Vector Search index to query.
+    index_name = st.text_input("Vector Search index", value=DEFAULT_INDEX)
+    # Which serving endpoints to use.
+    embed_endpoint = st.text_input("Embedding endpoint", value=EMBED_ENDPOINT)
+    chat_endpoint = st.text_input("Chat endpoint", value=CHAT_ENDPOINT)
     # How many chunks to retrieve per question (slider from 1 to 10, default 5).
     top_k = st.slider("Top-k chunks", 1, 10, 5)
     # Minimum similarity to treat a chunk as relevant (0.0 to 1.0, default 0.3).
     min_score = st.slider("Min relevance score", 0.0, 1.0, 0.3, 0.05)
-    # A button to force rebuilding the index (e.g. after changing documents).
-    rebuild = st.button("Rebuild index")
+    if PROFILE:
+        st.caption(f"Local run using profile: `{PROFILE}`")
 
 
 # COMMAND ----------
-# Build the retriever once and cache it, so it is not rebuilt on every interaction.
-@st.cache_resource(show_spinner="Building local index ...")
-def _load_retriever(folder: str):
-    embedder = LocalEmbedder()                                 # the embedding model
-    retriever, chunks = build_retriever(folder, embedder=embedder)  # load+chunk+embed+index
-    return embedder, retriever, len(chunks)                    # return all three
+# Build the Databricks-backed chain once and cache it (re-created if settings change).
+@st.cache_resource(show_spinner="Connecting to Databricks ...")
+def _build_chain(index: str, embed_ep: str, chat_ep: str, k: int, score: float):
+    # The query embedder (Databricks endpoint) - same model that built the index.
+    embedder = DatabricksEmbedder(endpoint=embed_ep, profile=PROFILE)
+    # The retriever queries the managed Vector Search index.
+    retriever = VectorSearchRetriever(index_name=index, profile=PROFILE)
+    # The generator (Databricks chat endpoint).
+    llm = DatabricksChatClient(endpoint=chat_ep, profile=PROFILE)
+    # Wire them together into the RAG chain (orchestration is backend-agnostic).
+    return RagChain(retriever=retriever, embed_fn=embedder.encode_one, llm=llm, top_k=k, min_score=score)
 
 
 # COMMAND ----------
-# If the user clicked "Rebuild index", clear the cache so it rebuilds.
-if rebuild:
-    _load_retriever.clear()
-
-# Try to build/load the index; show a clear error and stop if it fails.
+# Build/load the chain; show a clear error and stop if it fails.
 try:
-    embedder, retriever, n_chunks = _load_retriever(docs_dir)
-    st.sidebar.success(f"Indexed {n_chunks} chunks from {docs_dir}")
+    chain = _build_chain(index_name, embed_endpoint, chat_endpoint, top_k, min_score)
 except Exception as exc:
-    st.error(f"Could not build the index from '{docs_dir}': {exc}")
+    st.error(f"Could not connect to Databricks: {exc}")
     st.stop()
-
-# COMMAND ----------
-# Create the RAG chain, wiring together the retriever, the embedder, and the LLM.
-chain = RagChain(
-    retriever=retriever,
-    embed_fn=embedder.encode_one,          # how to turn the question into a vector
-    llm=OllamaClient(model=model_name),    # the local model that writes the answer
-    top_k=top_k,
-    min_score=min_score,
-)
 
 # COMMAND ----------
 # The chat input box at the bottom of the page.
@@ -97,7 +105,7 @@ if question:                                   # runs when the user submits a qu
         with st.spinner("Retrieving and generating ..."):   # loading indicator
             try:
                 result = chain.answer(question)             # the actual RAG call
-            except LLMUnavailableError as exc:              # Ollama not running?
+            except LLMUnavailableError as exc:              # endpoint/quota problem?
                 st.error(str(exc))
                 st.stop()
 

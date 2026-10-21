@@ -1,16 +1,21 @@
-# Local zero-cost baseline. Pin exact versions once the environment is verified.
-sentence-transformers>=2.2
-faiss-cpu>=1.7
+# Databricks-first RAG POC. All models + retrieval run on Databricks Free Edition.
+
+# --- Default (Databricks) path ---------------------------------------------
+# Workspace access: serving endpoints (embeddings + chat) and Vector Search.
+databricks-sdk>=0.154
+# Chat UI (local client or Databricks App).
 streamlit>=1.30
-requests>=2.31
+# Vector math used by the embedding adapter (normalization).
+numpy>=1.24
+# Tests.
 pytest>=7.4
 
-# Local document parsing (Phase 2 / local pipeline)
+# Local document parsing (ingestion notebooks / local fallback loader).
 python-docx>=1.1
 pypdf>=5.0
 
-# Local LLM generation uses Ollama over HTTP (stdlib urllib) - no Python package.
-# Install Ollama separately and run: ollama pull llama3.2:3b
-
-# Databricks workspace access (catalogs, SQL statement execution, bundles)
-databricks-sdk>=0.154
+# --- Optional OFFLINE fallback only (NOT the default path) ------------------
+# Uncomment to enable the fully local path (local embeddings + FAISS + Ollama).
+# sentence-transformers>=2.2
+# faiss-cpu>=1.7
+# Ollama is installed separately and served over HTTP: ollama pull llama3.2:3b

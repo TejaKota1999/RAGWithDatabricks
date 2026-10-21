@@ -1,23 +1,22 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 05 - Create a Vector Search index (OPTIONAL, managed variant)
+# MAGIC # 05 - Create a Vector Search index (Databricks retrieval)
 # MAGIC
-# MAGIC Phase 6 of the RAG POC, **managed path**. This is NOT part of the
-# MAGIC zero-cost baseline. It uses **Databricks Vector Search**, a managed
-# MAGIC service that provisions an **endpoint (compute)** and may incur cost
-# MAGIC and/or be limited on Free Edition.
+# MAGIC Phase 6 of the RAG POC. This is now the **default retrieval path**: a
+# MAGIC Databricks **Vector Search** Delta Sync index over the `document_embeddings`
+# MAGIC table (self-managed 1024-dim vectors from notebook 04).
 # MAGIC
 # MAGIC A "Vector Search index" is a managed search engine over your embeddings:
 # MAGIC you give it a question vector and it returns the most similar chunks fast.
-# MAGIC The local alternative (no managed service) is FAISS in `src/retriever.py`.
 # MAGIC
-# MAGIC Safe by default: `create_resources=false` only prints the plan and
-# MAGIC validates inputs. Nothing billable is created until you set it to
-# MAGIC `true` **and** have confirmed availability/pricing for your workspace.
+# MAGIC Cost note: Vector Search is included in Free Edition but provisions a
+# MAGIC managed **endpoint (compute)** and is metered against the serverless quota.
+# MAGIC `create_resources=false` only validates and prints the plan; nothing is
+# MAGIC created until you set it to `true`.
 # MAGIC
-# MAGIC Index design: **Delta Sync, self-managed embeddings** over the
-# MAGIC `document_embeddings` table (we already computed the vectors in Phase 5),
-# MAGIC so no managed embedding-model endpoint is required.
+# MAGIC Important: the index dimension (1024) must match the embedding endpoint. If
+# MAGIC an older 384-dim index exists under the same name, set `recreate_index=true`
+# MAGIC to delete and rebuild it (dimension cannot be changed in place).
 # MAGIC
 # MAGIC Every configurable value is a widget / job parameter. Nothing is hardcoded.
 
@@ -43,14 +42,16 @@ dbutils.widgets.dropdown("endpoint_type", "STANDARD", ["STANDARD", "STORAGE_OPTI
 dbutils.widgets.text("primary_key", "chunk_id", "7. Primary key column")
 # The column that holds the pre-computed embedding vector.
 dbutils.widgets.text("embedding_column", "embedding", "8. Embedding vector column")
-# The length of each vector; must match what notebook 04 produced.
-dbutils.widgets.text("embedding_dim", "384", "9. Embedding dimension")
+# The length of each vector; must match what notebook 04 produced (1024).
+dbutils.widgets.text("embedding_dim", "1024", "9. Embedding dimension")
 # TRIGGERED = sync on demand; CONTINUOUS = keep syncing automatically.
 dbutils.widgets.dropdown("pipeline_type", "TRIGGERED", ["TRIGGERED", "CONTINUOUS"], "10. Sync pipeline type")
-# The model used to embed the QUESTION at query time - must match Phase 5's model.
-dbutils.widgets.text("query_model", "sentence-transformers/all-MiniLM-L6-v2", "11. Query embed model (match Phase 5)")
+# The endpoint used to embed the QUESTION at query time - must match Phase 5.
+dbutils.widgets.text("query_endpoint", "databricks-qwen3-embedding-0-6b", "11. Query embed endpoint (match Phase 5)")
+# Delete and rebuild the index if one already exists (needed when the dim changed).
+dbutils.widgets.dropdown("recreate_index", "false", ["false", "true"], "12. Recreate index if it exists")
 # The safety switch: "false" creates nothing; "true" creates billable resources.
-dbutils.widgets.dropdown("create_resources", "false", ["false", "true"], "12. CREATE billable resources")
+dbutils.widgets.dropdown("create_resources", "false", ["false", "true"], "13. CREATE resources")
 
 print("Widgets declared.")
 
@@ -72,7 +73,8 @@ PRIMARY_KEY = dbutils.widgets.get("primary_key").strip()
 EMBEDDING_COLUMN = dbutils.widgets.get("embedding_column").strip()
 EMBEDDING_DIM = int(dbutils.widgets.get("embedding_dim"))         # text -> integer
 PIPELINE_TYPE = dbutils.widgets.get("pipeline_type")
-QUERY_MODEL = dbutils.widgets.get("query_model").strip()
+QUERY_ENDPOINT = dbutils.widgets.get("query_endpoint").strip()
+RECREATE_INDEX = dbutils.widgets.get("recreate_index") == "true"
 # The guard: only True when the dropdown is exactly "true".
 CREATE_RESOURCES = dbutils.widgets.get("create_resources") == "true"
 
@@ -86,17 +88,17 @@ print("INDEX_FQN       :", INDEX_FQN)
 print("ENDPOINT        :", ENDPOINT_NAME, f"({ENDPOINT_TYPE})")
 print("PRIMARY_KEY     :", PRIMARY_KEY)
 print("EMBEDDING_COLUMN:", EMBEDDING_COLUMN, f"(dim={EMBEDDING_DIM})")
+print("QUERY_ENDPOINT  :", QUERY_ENDPOINT)
 print("PIPELINE_TYPE   :", PIPELINE_TYPE)
+print("RECREATE_INDEX  :", RECREATE_INDEX)
 print("CREATE_RESOURCES:", CREATE_RESOURCES)
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Cell 3 - COST / AVAILABILITY NOTICE - read before enabling creation
-# MAGIC Vector Search provisions a managed **endpoint (compute)** that can incur
-# MAGIC charges and may be unavailable or limited on Free Edition. Confirm current
-# MAGIC pricing and availability for this workspace before setting
-# MAGIC `create_resources=true`. To remove everything afterward:
+# MAGIC Vector Search provisions a managed **endpoint (compute)**, included in Free
+# MAGIC Edition but metered against the serverless quota. To remove everything:
 # MAGIC
 # MAGIC ```
 # MAGIC databricks vector-search-indexes delete-index <INDEX_FQN> --profile <p>
@@ -136,8 +138,8 @@ print("Source table is valid for a self-managed Delta Sync index.")
 
 # MAGIC %md
 # MAGIC ## Cell 5 - Enable Change Data Feed on the source table
-# MAGIC Delta Sync indexes require CDF on the source Delta table. This is a cheap
-# MAGIC table property change (no endpoint yet). Runs only when creating.
+# MAGIC Delta Sync indexes require CDF on the source Delta table (cheap table
+# MAGIC property change; no endpoint yet). Runs only when creating.
 
 # COMMAND ----------
 
@@ -153,8 +155,7 @@ else:
 # MAGIC %md
 # MAGIC ## Cell 6 - Vector Search client (SDK, pre-installed)
 # MAGIC Uses the `databricks-sdk` already on the serverless runtime, so there is
-# MAGIC **no pip install** and no dependency/protobuf conflict. Only the sample
-# MAGIC query (Cell 9) needs an extra library.
+# MAGIC **no pip install** and no dependency/protobuf conflict.
 
 # COMMAND ----------
 
@@ -176,7 +177,7 @@ print("WorkspaceClient ready (SDK vector search API).")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Cell 7 - Create the endpoint (BILLABLE) - guarded
+# MAGIC ## Cell 7 - Create the endpoint - guarded
 # MAGIC Creates the Vector Search endpoint and waits until it is online. This is
 # MAGIC the step that provisions managed compute.
 
@@ -210,8 +211,9 @@ else:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Cell 8 - Create the Delta Sync index (self-managed embeddings) - guarded
-# MAGIC No `create_index_and_wait` exists in the SDK, so we poll `get_index`.
+# MAGIC ## Cell 8 - Create the Delta Sync index (self-managed 1024-dim) - guarded
+# MAGIC If the index already exists and `recreate_index=true`, it is deleted and
+# MAGIC rebuilt (needed when the embedding dimension changed, e.g. 384 -> 1024).
 
 # COMMAND ----------
 
@@ -228,15 +230,9 @@ def _index_exists(name: str) -> bool:
         return False
 
 
-# If creation is off, do nothing.
-if not CREATE_RESOURCES:
-    print("create_resources=false -> NOT creating an index.")
-# If it already exists, reuse it.
-elif _index_exists(INDEX_FQN):
-    print(f"index '{INDEX_FQN}' already exists")
-# Otherwise create the Delta Sync index over our embeddings table.
-else:
-    print(f"creating Delta Sync index '{INDEX_FQN}' ...")
+# Create the Delta Sync index over our embeddings table.
+def _create_index():
+    print(f"creating Delta Sync index '{INDEX_FQN}' (dim={EMBEDDING_DIM}) ...")
     w.vector_search_indexes.create_index(
         name=INDEX_FQN,                                 # the index's full name
         endpoint_name=ENDPOINT_NAME,                    # which endpoint hosts it
@@ -259,15 +255,35 @@ else:
             break
         time.sleep(10)                                  # wait 10s and check again
     else:
-        # The for-loop's else runs only if we never "break" (still not ready).
         print("index not ready yet; check status later with get-index.")
+
+
+# If creation is off, do nothing.
+if not CREATE_RESOURCES:
+    print("create_resources=false -> NOT creating an index.")
+# If it exists and we were asked to recreate it, delete then rebuild.
+elif _index_exists(INDEX_FQN) and RECREATE_INDEX:
+    print(f"index '{INDEX_FQN}' exists; recreate_index=true -> deleting it first ...")
+    w.vector_search_indexes.delete_index(INDEX_FQN)
+    # Wait until it is actually gone before recreating.
+    for _ in range(30):
+        if not _index_exists(INDEX_FQN):
+            break
+        time.sleep(5)
+    _create_index()
+# If it exists and we were NOT asked to recreate, reuse it.
+elif _index_exists(INDEX_FQN):
+    print(f"index '{INDEX_FQN}' already exists (set recreate_index=true to rebuild for a new dimension)")
+# Otherwise create it fresh.
+else:
+    _create_index()
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Cell 9 - Smoke-test the index with a self-embedded query - guarded
-# MAGIC Embeds a sample question with the SAME model used in Phase 5 and runs a
-# MAGIC similarity search via the SDK. Confirms the index returns grounded chunks.
+# MAGIC Embeds a sample question with the SAME Databricks endpoint used in Phase 5
+# MAGIC and runs a similarity search. Confirms the index returns grounded chunks.
 
 # COMMAND ----------
 
@@ -275,21 +291,7 @@ else:
 if not CREATE_RESOURCES:
     print("create_resources=false -> skipping index query smoke test.")
 else:
-    # Make sure sentence-transformers is available to embed the question.
-    import importlib
-    import subprocess
-    import sys
-
-    try:
-        importlib.import_module("sentence_transformers")
-    except ModuleNotFoundError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "sentence-transformers==3.3.1"])
-        importlib.invalidate_caches()
-
-    from sentence_transformers import SentenceTransformer
-
-    # Delta Sync runs an initial sync after creation; wait until the index is
-    # ready before querying (avoids "Vector index ... is not ready").
+    # Delta Sync runs an initial sync after creation; wait until ready before querying.
     print("waiting for the index to be queryable ...")
     for _ in range(90):  # up to ~15 min
         status = w.vector_search_indexes.get_index(INDEX_FQN).status
@@ -297,12 +299,11 @@ else:
             break
         time.sleep(10)
 
-    # Load the SAME embedding model used in Phase 5 (query and documents must match).
-    model = SentenceTransformer(QUERY_MODEL)
     # A sample question to test retrieval.
-    question = "What is the laptop or iPhone warranty and repair policy?"
-    # Turn the question into a vector (normalized, like the stored vectors).
-    qvec = model.encode([question], normalize_embeddings=True)[0].tolist()
+    question = "What are the criteria for getting a replacement iPhone?"
+    # Embed the question with the SAME Databricks endpoint used for the chunks.
+    qresp = w.serving_endpoints.query(name=QUERY_ENDPOINT, input=[question])
+    qvec = [float(x) for x in qresp.data[0].embedding]
 
     # Ask the index for the 3 most similar chunks to the question vector.
     res = w.vector_search_indexes.query_index(

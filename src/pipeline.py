@@ -1,11 +1,14 @@
 # Databricks notebook source
-"""Build a local FAISS retriever from a folder of documents (zero-cost path).
+"""Wire up the retriever + embedder for the RAG app.
 
-Ties together: load_documents -> build_chunks -> embed -> FaissRetriever. Runs
-fully on the local machine; no Databricks or paid service required.
+Default (Databricks) path: point at an existing Vector Search index and a
+Databricks embedding endpoint -- no local load/chunk/embed needed, because the
+documents were already processed by the notebooks.
 
-Plain English: point this at a folder of documents and it returns a ready-to-use
-search object (the retriever) plus the list of chunks it indexed.
+Fallback (local) path: build a FAISS retriever from a folder of documents.
+
+Plain English: these helpers return a ready-to-use (embedder, retriever) pair
+for the chat app.
 """
 
 from __future__ import annotations
@@ -13,12 +16,37 @@ from __future__ import annotations
 # The building blocks from the other modules.
 from src.chunker import build_chunks
 from src.document_loader import load_documents
-from src.embedder import LocalEmbedder
-from src.retriever import FaissRetriever
+from src.embedder import DatabricksEmbedder, LocalEmbedder
+from src.retriever import FaissRetriever, VectorSearchRetriever
 
 
 # COMMAND ----------
-# One call that runs the whole local ingestion+indexing pipeline.
+# DEFAULT: use the Databricks embedding endpoint + an existing Vector Search index.
+def build_databricks_retriever(
+    index_name: str,
+    embedding_endpoint: str | None = None,
+    chat_profile: str | None = None,
+    profile: str | None = None,
+):
+    """Return (embedder, retriever) backed by Databricks services.
+
+    ``index_name`` is the full Vector Search index name (catalog.schema.index).
+    ``profile`` is the CLI profile for local runs (None inside a Databricks App).
+    No documents are loaded locally -- retrieval hits the managed index directly.
+    """
+    # The query embedder must be the SAME model that built the index.
+    embedder = (
+        DatabricksEmbedder(endpoint=embedding_endpoint, profile=profile)
+        if embedding_endpoint
+        else DatabricksEmbedder(profile=profile)
+    )
+    # The retriever queries the managed Vector Search index.
+    retriever = VectorSearchRetriever(index_name=index_name, profile=profile)
+    return embedder, retriever
+
+
+# COMMAND ----------
+# FALLBACK: build a local FAISS retriever from a folder of documents (offline).
 def build_retriever(
     docs_dir: str,
     embedder: LocalEmbedder | None = None,
@@ -26,12 +54,12 @@ def build_retriever(
     chunk_overlap: int = 150,
     min_chunk_chars: int = 60,
 ) -> tuple[FaissRetriever, list[dict]]:
-    """Return a FaissRetriever over the chunks found under ``docs_dir``.
+    """Offline fallback: return a FaissRetriever over the chunks under ``docs_dir``.
 
-    Also returns the chunk records so callers (e.g. the UI) can show text.
-    Raises ValueError if the folder yields no usable chunks.
+    Also returns the chunk records so callers can show text. Raises ValueError if
+    the folder yields no usable chunks. NOT the default path.
     """
-    # Use the given embedder, or create a default one.
+    # Use the given local embedder, or create a default one.
     embedder = embedder or LocalEmbedder()
     # 1) Load + clean every document in the folder.
     documents = load_documents(docs_dir)
