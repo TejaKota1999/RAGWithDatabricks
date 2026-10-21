@@ -118,10 +118,21 @@ def _render_sources(sources):
             score = s.get("score")
             # Format the score to 3 decimals if it is a number, else "n/a".
             score_str = f"{score:.3f}" if isinstance(score, (int, float)) else "n/a"
+            # Show just the file name, not the full volume path (which is long).
+            path = s.get("source_path") or ""
+            file_name = path.rsplit("/", 1)[-1] if path else ""
+            section = s.get("section") or "n/a"
+            chunk_id = s.get("chunk_id", "?")
+            # Wrap in a div with overflow-wrap:anywhere so long ids/paths break
+            # instead of spilling horizontally outside the box.
             st.markdown(
-                f"- `{s.get('chunk_id', '?')}` "
-                f"(section: {s.get('section') or 'n/a'}, score: {score_str})  \n"
-                f"  {s.get('source_path', '')}"
+                "<div style='overflow-wrap:anywhere;word-break:break-word;"
+                "margin-bottom:10px;line-height:1.4'>"
+                f"<code style='white-space:normal'>{chunk_id}</code><br>"
+                f"<span style='color:#888;font-size:0.85em'>"
+                f"section: {section} &middot; score: {score_str} &middot; {file_name}"
+                "</span></div>",
+                unsafe_allow_html=True,
             )
 
 
