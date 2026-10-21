@@ -1,4 +1,3 @@
-# Databricks notebook source
 """Local document loading and text extraction (zero-cost path).
 
 Mirrors the Databricks extraction notebook (Phase 2) for a local machine:

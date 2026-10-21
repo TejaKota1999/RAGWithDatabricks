@@ -1,4 +1,3 @@
-# Databricks notebook source
 """Embedding adapters: Databricks Foundation Model endpoint (default) + local fallback.
 
 The SAME model must embed both document chunks and questions. The default path

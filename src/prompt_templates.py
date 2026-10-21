@@ -1,4 +1,3 @@
-# Databricks notebook source
 """Prompt construction for grounded RAG answers.
 
 The model must answer only from the supplied context, cite sources, and abstain

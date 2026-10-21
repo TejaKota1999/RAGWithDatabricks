@@ -1,4 +1,3 @@
-# Databricks notebook source
 """Evaluation helpers for retrieval and grounding (pure functions).
 
 Measures retrieval quality (Recall@K), whether an answer is grounded in the

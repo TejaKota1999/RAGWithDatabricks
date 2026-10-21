@@ -1,4 +1,3 @@
-# Databricks notebook source
 """LLM adapters: Databricks chat endpoint (default) + local Ollama fallback.
 
 The default path generates answers with a Databricks Foundation Model chat

@@ -1,4 +1,3 @@
-# Databricks notebook source
 """Wire up the retriever + embedder for the RAG app.
 
 Default (Databricks) path: point at an existing Vector Search index and a

@@ -1,4 +1,3 @@
-# Databricks notebook source
 """RAG orchestration: retrieve -> threshold -> abstain/answer -> sources.
 
 Dependencies are injected (retriever, embed function, LLM), so the chain is

@@ -1,4 +1,3 @@
-# Databricks notebook source
 """Shared Databricks workspace client helper (authentication).
 
 Centralizes how the RAG code authenticates to Databricks so every adapter

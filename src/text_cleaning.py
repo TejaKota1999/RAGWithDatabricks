@@ -1,4 +1,3 @@
-# Databricks notebook source
 """Text cleaning shared by the extraction notebook (Phase 2) and tests.
 
 Normalizes whitespace only. It must NOT remove meaningful content: headings,

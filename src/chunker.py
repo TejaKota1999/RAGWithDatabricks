@@ -1,4 +1,3 @@
-# Databricks notebook source
 """Chunking logic shared by the chunking notebook (Phase 3) and tests.
 
 Paragraph-aware packing with a configurable size and overlap, stable chunk IDs,

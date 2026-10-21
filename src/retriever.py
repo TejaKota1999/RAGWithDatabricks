@@ -1,4 +1,3 @@
-# Databricks notebook source
 """Retrieval adapters: Databricks Vector Search (default) + local FAISS fallback.
 
 The default path queries a Databricks Vector Search index in the workspace. A
