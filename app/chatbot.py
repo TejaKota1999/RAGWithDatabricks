@@ -123,33 +123,6 @@ def _clean_answer(text: str) -> str:
     return text.strip()
 
 
-# Helper: render the sources of one assistant turn inside a collapsible section.
-def _render_sources(sources):
-    if not sources:
-        return
-    with st.expander(f"Sources ({len(sources)})"):
-        for s in sources:
-            score = s.get("score")
-            # Format the score to 3 decimals if it is a number, else "n/a".
-            score_str = f"{score:.3f}" if isinstance(score, (int, float)) else "n/a"
-            # Show just the file name, not the full volume path (which is long).
-            path = s.get("source_path") or ""
-            file_name = path.rsplit("/", 1)[-1] if path else ""
-            section = s.get("section") or "n/a"
-            chunk_id = s.get("chunk_id", "?")
-            # Wrap in a div with overflow-wrap:anywhere so long ids/paths break
-            # instead of spilling horizontally outside the box.
-            st.markdown(
-                "<div style='overflow-wrap:anywhere;word-break:break-word;"
-                "margin-bottom:10px;line-height:1.4'>"
-                f"<code style='white-space:normal'>{chunk_id}</code><br>"
-                f"<span style='color:#888;font-size:0.85em'>"
-                f"section: {section} &middot; score: {score_str} &middot; {file_name}"
-                "</span></div>",
-                unsafe_allow_html=True,
-            )
-
-
 # COMMAND ----------
 # Re-draw the full transcript so far (every past question and answer stays visible).
 for m in st.session_state.messages:
@@ -158,7 +131,6 @@ for m in st.session_state.messages:
         if m["role"] == "assistant":
             if m.get("abstained"):
                 st.info("No sufficiently relevant evidence was found, so the assistant abstained.")
-            _render_sources(m.get("sources", []))
 
 # COMMAND ----------
 # The chat input box at the bottom of the page.
@@ -181,7 +153,6 @@ if question:                                   # runs when the user submits a qu
         st.write(answer_display)               # show the clean answer text
         if result.get("abstained"):            # if it abstained, say so clearly
             st.info("No sufficiently relevant evidence was found, so the assistant abstained.")
-        _render_sources(result.get("sources", []))
 
     # Save the assistant's answer (with its sources) so it persists on the next rerun.
     st.session_state.messages.append(
