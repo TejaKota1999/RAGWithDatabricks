@@ -26,6 +26,7 @@ from __future__ import annotations
 
 # os/sys: read config from the environment and make `src` importable.
 import os
+import re
 import sys
 
 # Add the project root to Python's import path so `from src...` works.
@@ -109,6 +110,19 @@ if clear:
     st.session_state.messages = []
 
 
+# Matches inline citations like [Doc_Name:0:0003] that the model adds after claims.
+_CITE_RE = re.compile(r"\s*\[[^\[\]]*:\d+:\d+[^\[\]]*\]")
+
+
+# Remove the raw [chunk_id] citations from the answer text for a clean display.
+# The Sources panel below already shows exactly which chunks were used.
+def _clean_answer(text: str) -> str:
+    text = _CITE_RE.sub("", text or "")      # drop the bracketed source ids
+    text = re.sub(r"\s+([.,;:)])", r"\1", text)  # tidy space left before punctuation
+    text = re.sub(r"[ \t]{2,}", " ", text)   # collapse double spaces
+    return text.strip()
+
+
 # Helper: render the sources of one assistant turn inside a collapsible section.
 def _render_sources(sources):
     if not sources:
@@ -162,7 +176,9 @@ if question:                                   # runs when the user submits a qu
                 st.error(str(exc))
                 st.stop()
 
-        st.write(result["answer"])             # show the answer text
+        # Strip inline [chunk_id] citations; the Sources panel holds traceability.
+        answer_display = _clean_answer(result["answer"])
+        st.write(answer_display)               # show the clean answer text
         if result.get("abstained"):            # if it abstained, say so clearly
             st.info("No sufficiently relevant evidence was found, so the assistant abstained.")
         _render_sources(result.get("sources", []))
@@ -171,7 +187,7 @@ if question:                                   # runs when the user submits a qu
     st.session_state.messages.append(
         {
             "role": "assistant",
-            "content": result["answer"],
+            "content": answer_display,
             "sources": result.get("sources", []),
             "abstained": result.get("abstained", False),
         }
