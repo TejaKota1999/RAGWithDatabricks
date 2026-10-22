@@ -76,19 +76,24 @@ def _display_name():
     return "Guest"
 
 
-# Render a styled name badge fixed to the top-right corner.
-st.markdown(
-    f"""
-    <div style="position:fixed; top:0.75rem; right:1.25rem; z-index:1000;
-                background:linear-gradient(135deg,#6366f1,#8b5cf6);
-                color:#ffffff; padding:6px 16px; border-radius:999px;
-                font-weight:600; font-size:0.9rem;
-                box-shadow:0 2px 8px rgba(0,0,0,0.25);">
-        &#128100; {_display_name()}
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+# Show a styled name badge at the top-right of the content (reliable: in-flow,
+# right-aligned, so it is not hidden behind Streamlit's header bar).
+_spacer, _badge = st.columns([3, 1])
+with _badge:
+    st.markdown(
+        f"""
+        <div style="text-align:right; margin-top:-0.5rem;">
+          <span style="display:inline-block;
+                       background:linear-gradient(135deg,#6366f1,#8b5cf6);
+                       color:#ffffff; padding:6px 16px; border-radius:999px;
+                       font-weight:600; font-size:0.9rem; white-space:nowrap;
+                       box-shadow:0 2px 8px rgba(0,0,0,0.25);">
+            &#128100; {_display_name()}
+          </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 st.title("Company Knowledge Assistant")
 st.caption("RAG on Databricks Free Edition. Answers are grounded in retrieved documents.")
