@@ -83,17 +83,53 @@ import time
 import pytest
 
 
-# A tiny pytest plugin to record how many tests were collected and how many failed.
-class _Stats:
-    collected = 0
-    failed = 0
+# Helper to strip ANSI colour codes so stored text is clean.
+import re as _re
 
-    def pytest_sessionfinish(self, session, exitstatus):
-        self.collected = int(getattr(session, "testscollected", 0))
-        self.failed = int(getattr(session, "testsfailed", 0))
+_ANSI = _re.compile(r"\x1b\[[0-9;]*m")
 
 
-stats = _Stats()
+def _clean(text):
+    return _ANSI.sub("", text or "")
+
+
+# A pytest plugin that records EACH test: its description (docstring or a
+# humanized name), pass/fail status, duration, and any failure message.
+class _PerTest:
+    def __init__(self):
+        self.desc = {}   # nodeid -> one-line description
+        self.rows = {}   # nodeid -> (STATUS, duration_sec, message)
+
+    # Called once after collection: grab each test's docstring as its description.
+    def pytest_collection_modifyitems(self, items):
+        for it in items:
+            doc = ""
+            try:
+                fn = getattr(it, "obj", None)
+                doc = (fn.__doc__ or "").strip() if fn is not None else ""
+            except Exception:
+                doc = ""
+            first = doc.splitlines()[0].strip() if doc else ""
+            if not first:
+                # No docstring -> make a readable description from the test name,
+                # e.g. "test_stable_chunk_id" -> "stable chunk id".
+                nm = it.name[5:] if it.name.startswith("test_") else it.name
+                first = nm.replace("_", " ").strip()
+            self.desc[it.nodeid] = first
+
+    # Called for each test phase: record the outcome of the "call" phase (or an
+    # error/skip during setup) so we know PASSED / FAILED / SKIPPED per test.
+    def pytest_runtest_logreport(self, report):
+        if report.when == "call":
+            msg = "" if report.outcome == "passed" else _clean(str(report.longrepr))[:1000]
+            self.rows[report.nodeid] = (report.outcome.upper(), round(report.duration, 4), msg)
+        elif report.when == "setup" and report.outcome in ("skipped", "failed") \
+                and report.nodeid not in self.rows:
+            self.rows[report.nodeid] = (report.outcome.upper(), round(report.duration, 4),
+                                        _clean(str(report.longrepr))[:1000])
+
+
+pert = _PerTest()
 tests_dir = os.path.join(WORK, "tests")
 print("running:", tests_dir)
 
@@ -104,25 +140,20 @@ _start = time.time()
 with contextlib.redirect_stdout(_buf), contextlib.redirect_stderr(_buf):
     exit_code = int(pytest.main(
         ["-rA", "-p", "no:cacheprovider", "--rootdir", WORK, tests_dir],
-        plugins=[stats],
+        plugins=[pert],
     ))
 duration_sec = round(time.time() - _start, 3)
 pytest_output = _buf.getvalue()
 print(pytest_output)                    # show full output in the cell
 
-# Derive the headline numbers for the audit log.
-tests_total = stats.collected
-tests_failed = stats.failed
-tests_passed = max(tests_total - tests_failed, 0)
-status = "SUCCESS" if exit_code == 0 else "FAILURE"
-# The last non-empty line of pytest output is its summary (e.g. "46 passed in 1.2s").
-# Strip ANSI colour codes so the stored text is clean.
-import re as _re
-
-_ansi = _re.compile(r"\x1b\[[0-9;]*m")
+# Derive the headline numbers from the per-test results.
+tests_total = len(pert.desc) if pert.desc else len(pert.rows)
+tests_failed = sum(1 for (st, _d, _m) in pert.rows.values() if st == "FAILED")
+tests_passed = sum(1 for (st, _d, _m) in pert.rows.values() if st == "PASSED")
+run_status = "SUCCESS" if exit_code == 0 else "FAILURE"
 summary_lines = [ln for ln in pytest_output.splitlines() if ln.strip()]
-summary = _ansi.sub("", summary_lines[-1])[:500] if summary_lines else ""
-print(f"status={status} total={tests_total} passed={tests_passed} "
+summary = _clean(summary_lines[-1])[:500] if summary_lines else ""
+print(f"run_status={run_status} total={tests_total} passed={tests_passed} "
       f"failed={tests_failed} exit={exit_code} duration={duration_sec}s")
 
 # COMMAND ----------
@@ -158,40 +189,68 @@ try:
 except Exception as _e:
     print("could not read job run id:", _e)
 
-# Describe the audit table's columns (created automatically on first write).
+# uuid groups all the per-test rows that belong to one run.
+import uuid
+
+RUN_ID = str(uuid.uuid4())
+RUN_TS = datetime.now(timezone.utc).isoformat()
+
+# One row PER TEST: name, description, status, duration, and any failure message.
 log_schema = StructType(
     [
-        StructField("run_timestamp", StringType(), False),   # when the run happened (UTC)
-        StructField("status", StringType(), False),          # SUCCESS or FAILURE
-        StructField("exit_code", IntegerType(), False),      # pytest exit code (0 = all passed)
-        StructField("tests_total", IntegerType(), False),    # number of tests collected
-        StructField("tests_passed", IntegerType(), False),
-        StructField("tests_failed", IntegerType(), False),
-        StructField("duration_sec", DoubleType(), False),    # how long the suite took
-        StructField("summary", StringType(), True),          # pytest's summary line
-        StructField("job_run_id", StringType(), True),       # Databricks Job run id (if known)
+        StructField("run_id", StringType(), False),        # groups the tests of one run
+        StructField("run_timestamp", StringType(), False), # when the run happened (UTC)
+        StructField("run_status", StringType(), False),    # overall SUCCESS / FAILURE
+        StructField("test_file", StringType(), False),     # e.g. test_chunker.py
+        StructField("test_name", StringType(), False),     # e.g. test_stable_chunk_id
+        StructField("description", StringType(), True),     # docstring or humanized name
+        StructField("status", StringType(), False),        # PASSED / FAILED / SKIPPED
+        StructField("duration_sec", DoubleType(), False),  # this test's runtime
+        StructField("message", StringType(), True),         # failure detail (empty if passed)
+        StructField("job_run_id", StringType(), True),      # Databricks Job run id (if known)
     ]
 )
 
-# Build the single audit row for this run.
-log_row = [
-    {
-        "run_timestamp": datetime.now(timezone.utc).isoformat(),
-        "status": status,
-        "exit_code": exit_code,
-        "tests_total": tests_total,
-        "tests_passed": tests_passed,
-        "tests_failed": tests_failed,
-        "duration_sec": float(duration_sec),
-        "summary": summary,
-        "job_run_id": str(job_run_id) if job_run_id is not None else None,
-    }
-]
+# Build one row for every collected test (fall back to any that ran but weren't
+# in collection, e.g. on a collection error).
+rows = []
+nodeids = list(pert.desc.keys()) or list(pert.rows.keys())
+for nodeid in nodeids:
+    st, dur, msg = pert.rows.get(nodeid, ("NOTRUN", 0.0, ""))
+    test_file = nodeid.split("::", 1)[0].replace("\\", "/").split("/")[-1]
+    test_name = nodeid.split("::")[-1]
+    rows.append(
+        {
+            "run_id": RUN_ID,
+            "run_timestamp": RUN_TS,
+            "run_status": run_status,
+            "test_file": test_file,
+            "test_name": test_name,
+            "description": pert.desc.get(nodeid, ""),
+            "status": st,
+            "duration_sec": float(dur),
+            "message": msg,
+            "job_run_id": str(job_run_id) if job_run_id is not None else None,
+        }
+    )
 
-# Append the row to the Delta table (creates it if it does not exist yet).
-spark.createDataFrame(log_row, schema=log_schema).write.mode("append").saveAsTable(TEST_LOG_FQN)
-print(f"Logged test run to {TEST_LOG_FQN}: status={status}, "
-      f"passed={tests_passed}/{tests_total}, exit={exit_code}")
+# If nothing was collected (e.g. a collection/import error), still log one row so
+# the failure is never silent.
+if not rows:
+    rows.append(
+        {
+            "run_id": RUN_ID, "run_timestamp": RUN_TS, "run_status": run_status,
+            "test_file": "(collection)", "test_name": "(no tests collected)",
+            "description": "pytest could not collect tests", "status": "ERROR",
+            "duration_sec": float(duration_sec), "message": summary,
+            "job_run_id": str(job_run_id) if job_run_id is not None else None,
+        }
+    )
+
+# Append all per-test rows to the Delta table (creates it if it does not exist).
+spark.createDataFrame(rows, schema=log_schema).write.mode("append").saveAsTable(TEST_LOG_FQN)
+print(f"Logged {len(rows)} test row(s) to {TEST_LOG_FQN} "
+      f"(run_id={RUN_ID}, run_status={run_status}, passed={tests_passed}/{tests_total})")
 
 # COMMAND ----------
 

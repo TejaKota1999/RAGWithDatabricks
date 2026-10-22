@@ -84,6 +84,82 @@ If any component is unavailable or quota-blocked at run time, stop and
 report it rather than silently switching to a paid tier or the local
 fallback.
 
+## Operational reference (pipelines, resources, and gotchas)
+
+This section records how the project is actually wired on the target
+workspace, so future work does not rediscover it. Verify names against the
+live workspace if anything looks stale.
+
+### Workspace facts
+
+-   CLI profile: `sairam` (always pass `--profile sairam`).
+-   Catalog / schema: `databricks_rag_dev.rag`.
+-   Volume (source docs): `/Volumes/databricks_rag_dev/rag/source_docs`.
+-   Tables: `documents_cleaned`, `document_chunks`, `document_embeddings`,
+    `test_log` (test audit, one row per test).
+-   Vector Search endpoint: `rag_poc_vs`; index
+    `databricks_rag_dev.rag.document_chunks_index` (Delta Sync, self-managed,
+    **1024-dim**).
+-   Serving endpoints: embeddings `databricks-qwen3-embedding-0-6b`
+    (1024-dim), chat `databricks-meta-llama-3-1-8b-instruct`.
+-   Databricks App: `rag-chatbot` (Streamlit).
+
+### Pipelines (Lakeflow Jobs in `databricks.yml`)
+
+-   **`rag_ingest`** - runs notebooks 02 -> 03 -> 04 -> 05 in order on
+    serverless. One job parameter `incremental` (`true`=incremental,
+    `false`=full) flows to all stages, plus `create_index` /
+    `recreate_index` for the index step.
+    -   `databricks bundle run rag_ingest -t dev --profile sairam` (incremental)
+    -   `... --params incremental=false` (full rebuild)
+-   **`rag_tests`** - runs the pytest suite on serverless
+    (`notebooks/run_tests.py`) and writes one row **per test** to `test_log`
+    (pass or fail), then fails the task if any test failed.
+    -   `databricks bundle run rag_tests -t dev --profile sairam`
+
+### Incremental processing (cost control)
+
+-   Notebooks 02-04 are incremental by default (`incremental=true`): they
+    process only **new or changed** documents, keyed on each file's
+    **`content_hash`**, and upsert by `document_id`. The embedding endpoint
+    (the metered cost) is only called for new/changed text.
+-   `incremental=false` forces a full rebuild (overwrite).
+-   Detection is by **content**, not filename: a re-uploaded identical file is
+    skipped; an edited file is reprocessed; a duplicate under a new name is
+    skipped.
+-   **Not handled:** deleting a file from the volume does not remove its rows;
+    delete them explicitly if needed.
+-   After an incremental run, re-run 05 (or the `rag_ingest` job) to **sync**
+    the Vector Search index. Rebuild the index (`recreate_index=true`) only if
+    the embedding dimension changes.
+
+### Critical gotchas (do not regress)
+
+-   **`src/` files must NOT begin with `# Databricks notebook source`.** The
+    bundle imports any such file as a *notebook object* (no `.py`), which
+    breaks `import src.*` in the Databricks App and elsewhere. Keep `src/` as
+    plain importable modules; only the real cell-by-cell notebooks in
+    `notebooks/` carry that header.
+-   **The Workspace files mount cannot create `__pycache__`** (`OSError 95`),
+    so `run_tests.py` copies `src/` and `tests/` to a `tempfile.mkdtemp()`
+    directory and runs pytest there. Do not point pytest at the Workspace path.
+-   **Databricks App permissions:** the app's service principal needs
+    `USE CATALOG` + `USE SCHEMA` on `databricks_rag_dev.rag`, `SELECT` on the
+    index and embeddings table, and query access to the two serving endpoints.
+    Grant these after `apps create` or the app errors on first query.
+-   The app runs locally too (thin client): set
+    `DATABRICKS_CONFIG_PROFILE=sairam` and `streamlit run app/chatbot.py`.
+    Inside the App that variable is unset and the App identity is used.
+-   For CLI calls with Workspace paths from Git Bash, set `MSYS_NO_PATHCONV=1`
+    to stop path mangling.
+
+### Known limitation
+
+-   The 8B chat model does not always emit the exact abstain string and can
+    give a cautious soft-decline; it does not hallucinate policies. Use a
+    larger chat model or stricter post-processing if crisper abstention is
+    required.
+
 ## Intended use case
 
 Build a company knowledge assistant. Example question:
