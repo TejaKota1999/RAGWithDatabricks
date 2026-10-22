@@ -66,6 +66,18 @@ resources:
               recreate_index: "{{job.parameters.recreate_index}}"
               embedding_dim: "1024"
 
+    # Test pipeline: run the pytest suite on serverless (mocks Databricks; no quota).
+    rag_tests:
+      name: "[${bundle.target}] RAG Tests"
+      tasks:
+        - task_key: run_tests
+          notebook_task:
+            notebook_path: ${workspace.file_path}/notebooks/run_tests
+            base_parameters:
+              # Pass the synced files path so the notebook can import src/ and find tests/.
+              project_root: ${workspace.file_path}
+          # No cluster config = serverless compute.
+
 targets:
   dev:
     mode: development
