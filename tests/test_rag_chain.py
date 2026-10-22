@@ -50,50 +50,59 @@ def _retriever():
 
 # An empty/blank question must be rejected up front with an error.
 def test_empty_question_raises():
-    # embed_fn is a fake lambda returning a fixed vector; the LLM is never reached.
+    # Example: user submits "   " (just spaces) -> the chain raises ValueError
+    #   immediately, before embedding or calling the model.
     chain = RagChain(_retriever(), lambda q: [1.0, 0.0, 0.0], FakeLLM())
     with pytest.raises(ValueError):
-        chain.answer("   ")                      # only spaces -> ValueError
+        chain.answer("   ")
 
 
 # A relevant question should answer, attach the right source, and feed the LLM the context.
 def test_answers_with_sources_when_relevant():
+    # Example: "What is the returns policy?" -> embeds to [1,0,0] (near "returns"),
+    #   retrieves the returns chunk, and the fake LLM answers "...30 days...".
+    #   The result's first source is "returns:0:0000", and the chunk text + rules
+    #   were passed to the LLM.
     llm = FakeLLM()
-    # embed_fn returns a vector pointing at the "returns" chunk; min_score 0.5.
     chain = RagChain(_retriever(), lambda q: [1.0, 0.0, 0.0], llm, top_k=2, min_score=0.5)
     result = chain.answer("What is the returns policy?")
-    assert result["abstained"] is False          # it answered (did not abstain)
-    assert "30 days" in result["answer"]         # the canned answer came back
-    assert result["sources"][0]["chunk_id"] == "returns:0:0000"   # correct source
-    # The chain actually passed the retrieved context + the rules to the LLM.
+    assert result["abstained"] is False
+    assert "30 days" in result["answer"]
+    assert result["sources"][0]["chunk_id"] == "returns:0:0000"
     assert "Returns within 30 days." in llm.last_prompt
     assert "only" in (llm.last_system or "").lower()
 
 
 # THE GUARDRAIL: when nothing is relevant enough, the chain must abstain (no LLM guess).
 def test_abstains_when_nothing_relevant():
-    # Query vector [0.3,0.3,0.3] is only ~0.577 similar to each doc; threshold 0.99
-    # is impossible to reach, so every chunk is filtered out.
+    # Example: an off-topic question embeds to [0.3,0.3,0.3], which is only ~0.577
+    #   similar to every chunk. With min_score=0.99 nothing passes, so the chain
+    #   returns "I cannot answer that..." with no sources - it does NOT guess.
     chain = RagChain(_retriever(), lambda q: [0.3, 0.3, 0.3], FakeLLM(), min_score=0.99)
     result = chain.answer("Totally unrelated question?")
-    assert result["abstained"] is True                 # abstained
-    assert result["answer"] == ABSTAIN_MESSAGE         # the "I cannot answer" message
-    assert result["sources"] == []                     # no sources returned
+    assert result["abstained"] is True
+    assert result["answer"] == ABSTAIN_MESSAGE
+    assert result["sources"] == []
 
 
 # If the LLM crashes, the chain must NOT leak the error - it returns a friendly result.
 def test_llm_failure_is_handled_gracefully():
+    # Example: retrieval succeeds but the model throws (BrokenLLM) -> the chain
+    #   catches it, records error="RuntimeError", still shows the sources, and
+    #   returns a message containing "unavailable" instead of crashing.
     chain = RagChain(_retriever(), lambda q: [1.0, 0.0, 0.0], BrokenLLM(), min_score=0.5)
     result = chain.answer("What is the returns policy?")
-    assert result["abstained"] is False                # it did retrieve evidence
-    assert result["error"] == "RuntimeError"           # the error type is recorded
-    assert result["sources"][0]["chunk_id"] == "returns:0:0000"   # sources still shown
-    assert "unavailable" in result["answer"].lower()   # a friendly message to the user
+    assert result["abstained"] is False
+    assert result["error"] == "RuntimeError"
+    assert result["sources"][0]["chunk_id"] == "returns:0:0000"
+    assert "unavailable" in result["answer"].lower()
 
 
 # The result should include diagnostics (how many retrieved, the top_k used, etc.).
 def test_diagnostics_present():
+    # Example: asking "returns?" with top_k=3 -> result["diagnostics"] reports
+    #   retrieved >= 1 and top_k == 3 (useful for debugging/tuning).
     chain = RagChain(_retriever(), lambda q: [1.0, 0.0, 0.0], FakeLLM(), top_k=3, min_score=0.1)
     result = chain.answer("returns?")
-    assert result["diagnostics"]["retrieved"] >= 1     # at least one chunk retrieved
-    assert result["diagnostics"]["top_k"] == 3         # echoes the setting used
+    assert result["diagnostics"]["retrieved"] >= 1
+    assert result["diagnostics"]["top_k"] == 3

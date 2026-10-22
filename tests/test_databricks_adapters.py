@@ -36,17 +36,19 @@ def _fake_embed_client():
 
 # encode() should return one vector per text, shaped (n, dim), and L2-normalized.
 def test_embedder_encode_shapes_and_normalizes():
+    # Example: encode(["aa","bbbb"]) -> a (2, 4) array (2 texts, 4-number vectors),
+    #   and because normalize=True each row has length ~1.0.
     emb = DatabricksEmbedder(normalize=True)
     emb._client = _fake_embed_client()           # inject the fake SDK client
-    arr = emb.encode(["aa", "bbbb"])             # embed two texts
-    assert arr.shape == (2, 4)                    # 2 rows, 4-number vectors
+    arr = emb.encode(["aa", "bbbb"])
+    assert arr.shape == (2, 4)
     import numpy as np
-    # Normalized vectors have length ~1.
     assert np.allclose(np.linalg.norm(arr, axis=1), 1.0, atol=1e-5)
 
 
 # encode_one() should return a single vector as a plain list of floats.
 def test_embedder_encode_one_returns_list():
+    # Example: encode_one("hello") -> [5.0, 1.0, 0.0, 0.0] (a plain list of 4 floats).
     emb = DatabricksEmbedder(normalize=False)
     emb._client = _fake_embed_client()
     vec = emb.encode_one("hello")
@@ -72,6 +74,8 @@ class _FakeChatEndpoints:
 
 # generate() should return the model's text from the response.
 def test_chat_generate_returns_text():
+    # Example: the fake endpoint returns "hello world" -> generate(...) returns
+    #   exactly "hello world" (the adapter pulls out choices[0].message.content).
     llm = DatabricksChatClient()
     llm._client = SimpleNamespace(serving_endpoints=_FakeChatEndpoints("hello world"))
     out = llm.generate("prompt", system="rules")
@@ -80,6 +84,8 @@ def test_chat_generate_returns_text():
 
 # If the endpoint call fails, it should raise a clear LLMUnavailableError (not crash raw).
 def test_chat_generate_wraps_errors():
+    # Example: the endpoint raises (e.g. down or over quota) -> the adapter turns
+    #   that into a friendly LLMUnavailableError instead of a raw crash.
     llm = DatabricksChatClient()
     llm._client = SimpleNamespace(serving_endpoints=_FakeChatEndpoints(raise_exc=True))
     with pytest.raises(LLMUnavailableError):
@@ -108,25 +114,30 @@ def _fake_vs_client():
 
 # search() should map columns to values and attach each row's score.
 def test_vs_search_returns_records_with_scores():
+    # Example: the fake index returns rows c1 (0.91) and c2 (0.20) -> search maps
+    #   column names to values, so hits[0] = {chunk_id:"c1", section:"S1", score:0.91, ...}.
     r = VectorSearchRetriever(index_name="cat.sch.idx")
     r._client = _fake_vs_client()
     hits = r.search([0.1, 0.2, 0.3], top_k=5)
     assert len(hits) == 2
-    assert hits[0]["chunk_id"] == "c1"             # first column mapped correctly
-    assert hits[0]["section"] == "S1"              # another column mapped correctly
-    assert abs(hits[0]["score"] - 0.91) < 1e-6     # score taken from the last value
+    assert hits[0]["chunk_id"] == "c1"
+    assert hits[0]["section"] == "S1"
+    assert abs(hits[0]["score"] - 0.91) < 1e-6
 
 
 # min_score should drop the weak (0.20) row, leaving only the strong one.
 def test_vs_search_applies_min_score():
+    # Example: with min_score=0.3, the 0.20 row (c2) is dropped and only c1 (0.91)
+    #   remains -> hits == ["c1"].
     r = VectorSearchRetriever(index_name="cat.sch.idx")
     r._client = _fake_vs_client()
     hits = r.search([0.1, 0.2, 0.3], top_k=5, min_score=0.3)
-    assert [h["chunk_id"] for h in hits] == ["c1"]  # only the 0.91 row survives
+    assert [h["chunk_id"] for h in hits] == ["c1"]
 
 
 # top_k must be at least 1, or it raises.
 def test_vs_search_rejects_bad_top_k():
+    # Example: search(..., top_k=0) -> ValueError (you must ask for >= 1 result).
     r = VectorSearchRetriever(index_name="cat.sch.idx")
     r._client = _fake_vs_client()
     with pytest.raises(ValueError):

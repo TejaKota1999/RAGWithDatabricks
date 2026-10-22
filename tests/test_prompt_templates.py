@@ -24,27 +24,36 @@ def _chunks():
 
 # The context block should tag each chunk's text with its source id in [brackets].
 def test_format_context_tags_sources():
+    # Example: two chunks -> a context block like
+    #   "[returns:0:0000]\nReturns within 30 days.\n\n[leave:0:0001]\n20 days paid leave."
+    #   (each chunk's text is labelled with its id so the answer can cite it).
     ctx = format_context(_chunks())
-    assert "[returns:0:0000]" in ctx             # first source id tag present
-    assert "Returns within 30 days." in ctx      # its text present
-    assert "[leave:0:0001]" in ctx               # second source id tag present
+    assert "[returns:0:0000]" in ctx
+    assert "Returns within 30 days." in ctx
+    assert "[leave:0:0001]" in ctx
 
 
 # With a small character budget, only the first chunk should fit in the context.
 def test_format_context_respects_max_chars():
+    # Example: max_chars=30 is only big enough for the first chunk, so the
+    #   second ("leave:0:0001") is left out to keep the prompt within budget.
     ctx = format_context(_chunks(), max_chars=30)
-    assert "returns:0:0000" in ctx               # first block kept
-    assert "leave:0:0001" not in ctx             # second block dropped (over budget)
+    assert "returns:0:0000" in ctx
+    assert "leave:0:0001" not in ctx
 
 
 # The final user prompt must include BOTH the question and the retrieved context.
 def test_build_user_prompt_contains_question_and_context():
+    # Example: question "What is the returns policy?" + the two chunks ->
+    #   one prompt string that contains the question AND "Returns within 30 days."
     prompt = build_user_prompt("What is the returns policy?", _chunks())
-    assert "What is the returns policy?" in prompt   # the question
-    assert "Returns within 30 days." in prompt       # the context
+    assert "What is the returns policy?" in prompt
+    assert "Returns within 30 days." in prompt
 
 
 # The system prompt must tell the model to answer ONLY from context and how to abstain.
 def test_system_prompt_enforces_grounding_and_abstention():
-    assert "only" in SYSTEM_PROMPT.lower()           # "use only the context" rule
-    assert ABSTAIN_MESSAGE in SYSTEM_PROMPT           # the exact abstain wording is included
+    # Example: the SYSTEM_PROMPT text includes the word "only" (use only the
+    #   context) and the exact ABSTAIN_MESSAGE ("I cannot answer that...").
+    assert "only" in SYSTEM_PROMPT.lower()
+    assert ABSTAIN_MESSAGE in SYSTEM_PROMPT

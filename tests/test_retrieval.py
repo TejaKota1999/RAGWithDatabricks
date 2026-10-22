@@ -24,7 +24,6 @@ def _toy_index():
         ],
         dtype="float32",
     )
-    # One metadata record per vector (aligned by row).
     records = [
         {"chunk_id": "returns:0:0000", "chunk_text": "Returns within 30 days.", "source_path": "returns.md"},
         {"chunk_id": "expenses:0:0000", "chunk_text": "Submit expenses in 60 days.", "source_path": "expenses.md"},
@@ -35,57 +34,67 @@ def _toy_index():
 
 # A query close to the first vector should return the "returns" chunk.
 def test_retrieves_most_relevant_chunk():
+    # Example: a "returns" question becomes the vector [0.9, 0.1, 0.0], which is
+    #   closest to the returns vector -> top hit is "returns:0:0000" (score > 0.9).
     r = _toy_index()
-    hits = r.search([0.9, 0.1, 0.0], top_k=1)   # ask for the single best match
+    hits = r.search([0.9, 0.1, 0.0], top_k=1)
     assert len(hits) == 1
-    assert hits[0]["chunk_id"] == "returns:0:0000"   # correct chunk found
-    assert hits[0]["score"] > 0.9                     # high similarity score
+    assert hits[0]["chunk_id"] == "returns:0:0000"
+    assert hits[0]["score"] > 0.9
     assert hits[0]["source_path"] == "returns.md"     # metadata carried through
 
 
 # top_k limits how many results come back, and they are ordered best-first.
 def test_top_k_limits_and_orders_results():
+    # Example: query [0.8, 0.6, 0.0] with top_k=2 -> returns 2 chunks,
+    #   "returns" first (higher score), "expenses" second.
     r = _toy_index()
-    hits = r.search([0.8, 0.6, 0.0], top_k=2)   # want the top 2
+    hits = r.search([0.8, 0.6, 0.0], top_k=2)
     assert len(hits) == 2
-    assert hits[0]["score"] >= hits[1]["score"]  # highest score first
+    assert hits[0]["score"] >= hits[1]["score"]   # highest score first
     assert hits[0]["chunk_id"] == "returns:0:0000"
 
 
 # min_score drops weak matches; only strong-enough chunks remain.
 def test_min_score_filters_irrelevant_results():
+    # Example: query [0,0,1] (points at "leave") with min_score=0.99 ->
+    #   only "leave" passes; "returns"/"expenses" are too weak and dropped.
     r = _toy_index()
-    # Query points exactly at "leave"; with a 0.99 threshold only "leave" passes.
     hits = r.search([0.0, 0.0, 1.0], top_k=3, min_score=0.99)
     assert all(h["chunk_id"] == "leave:0:0000" for h in hits)
-    # With a stricter 0.999 threshold, only a near-perfect match survives.
     none = r.search([1.0, 0.0, 0.0], top_k=3, min_score=0.999)
-    assert len(none) == 1
+    assert len(none) == 1                          # only the near-perfect match
 
 
 # If the threshold is impossibly high, NO chunks pass -> empty list (abstain).
 def test_no_results_when_threshold_excludes_all():
+    # Example: min_score=1.01 is above the max possible score (1.0), so nothing
+    #   qualifies -> []  (this is what makes the chatbot abstain).
     r = _toy_index()
-    hits = r.search([0.0, 1.0, 0.0], top_k=3, min_score=1.01)  # >1 is unreachable
-    assert hits == []                                           # nothing returned
+    hits = r.search([0.0, 1.0, 0.0], top_k=3, min_score=1.01)
+    assert hits == []
 
 
 # Asking for more results than exist just returns all of them (capped).
 def test_top_k_capped_to_index_size():
+    # Example: index has 3 chunks; asking for top_k=10 -> returns all 3 (not 10).
     r = _toy_index()
-    hits = r.search([1.0, 0.0, 0.0], top_k=10)  # only 3 vectors exist
+    hits = r.search([1.0, 0.0, 0.0], top_k=10)
     assert len(hits) == 3
 
 
 # A query vector of the wrong length must raise a clear error.
 def test_dim_mismatch_raises():
+    # Example: index vectors have 3 numbers; querying with 2 numbers [1.0, 0.0]
+    #   -> ValueError (the question and documents must share the same dimension).
     r = _toy_index()
     with pytest.raises(ValueError):
-        r.search([1.0, 0.0], top_k=1)           # 2 numbers, index expects 3
+        r.search([1.0, 0.0], top_k=1)
 
 
 # top_k must be at least 1.
 def test_invalid_top_k_raises():
+    # Example: top_k=0 (asking for zero results) makes no sense -> ValueError.
     r = _toy_index()
     with pytest.raises(ValueError):
         r.search([1.0, 0.0, 0.0], top_k=0)
@@ -93,6 +102,7 @@ def test_invalid_top_k_raises():
 
 # The number of metadata records must match the number of vectors.
 def test_records_length_must_match_vectors():
+    # Example: 2 vectors but only 1 metadata record -> ValueError (they must align
+    #   one-to-one, or a vector would have no chunk text/id).
     with pytest.raises(ValueError):
-        # 2 vectors but only 1 record -> error.
         FaissRetriever(np.zeros((2, 3), dtype="float32"), [{"chunk_id": "x"}])
