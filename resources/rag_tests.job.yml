@@ -1,0 +1,14 @@
+# Test pipeline: runs the pytest suite on serverless and logs per-test results
+# to the test_log Delta table. Edit this file to change the test pipeline.
+resources:
+  jobs:
+    rag_tests:
+      name: "[${bundle.target}] RAG Tests"
+      tasks:
+        - task_key: run_tests
+          notebook_task:
+            notebook_path: ${workspace.file_path}/notebooks/run_tests
+            base_parameters:
+              # Pass the synced files path so the notebook can import src/ and find tests/.
+              project_root: ${workspace.file_path}
+          # No cluster config = serverless compute.

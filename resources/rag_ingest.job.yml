@@ -1,0 +1,55 @@
+# Ingestion pipeline: runs notebooks 02 -> 05 in order on serverless.
+# Edit this file to change the ingestion pipeline (tasks, order, parameters).
+resources:
+  jobs:
+    rag_ingest:
+      name: "[${bundle.target}] RAG Ingest Pipeline"
+      # One switch for the whole pipeline. Pass at run time with --params.
+      parameters:
+        # "true" = incremental (only new/changed docs); "false" = full rebuild.
+        - name: incremental
+          default: "true"
+        # Whether the index step creates/syncs the Vector Search index.
+        - name: create_index
+          default: "true"
+        # Rebuild the index from scratch (needed only if the embedding dim changed).
+        - name: recreate_index
+          default: "false"
+
+      tasks:
+        # 1) Extract + clean text from the volume -> documents_cleaned
+        - task_key: extract_and_clean
+          notebook_task:
+            notebook_path: ${workspace.file_path}/notebooks/02_extract_and_clean
+            base_parameters:
+              incremental: "{{job.parameters.incremental}}"
+          # No cluster config = serverless compute (required on Free Edition).
+
+        # 2) Chunk the cleaned text -> document_chunks
+        - task_key: chunk_documents
+          depends_on:
+            - task_key: extract_and_clean
+          notebook_task:
+            notebook_path: ${workspace.file_path}/notebooks/03_chunk_documents
+            base_parameters:
+              incremental: "{{job.parameters.incremental}}"
+
+        # 3) Embed the chunks via the Databricks endpoint -> document_embeddings
+        - task_key: generate_embeddings
+          depends_on:
+            - task_key: chunk_documents
+          notebook_task:
+            notebook_path: ${workspace.file_path}/notebooks/04_generate_embeddings
+            base_parameters:
+              incremental: "{{job.parameters.incremental}}"
+
+        # 4) Create or sync the Vector Search index
+        - task_key: create_or_sync_index
+          depends_on:
+            - task_key: generate_embeddings
+          notebook_task:
+            notebook_path: ${workspace.file_path}/notebooks/05_create_ai_search_index
+            base_parameters:
+              create_resources: "{{job.parameters.create_index}}"
+              recreate_index: "{{job.parameters.recreate_index}}"
+              embedding_dim: "1024"

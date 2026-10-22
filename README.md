@@ -66,7 +66,9 @@ retained only as an **optional offline fallback** (see the end of this file).
 | `app/chatbot.py` | Streamlit UI (Databricks App + local) |
 | `app.yaml` | Databricks Apps runtime config (command + env) |
 | `tests/` | pytest unit tests (Databricks clients mocked; no network) |
-| `databricks.yml` | Asset Bundle (dev/prod targets) |
+| `databricks.yml` | Asset Bundle (dev/prod targets); includes `resources/*.yml` |
+| `resources/rag_ingest.job.yml` | Ingestion pipeline job definition (edit here) |
+| `resources/rag_tests.job.yml` | Test pipeline job definition (edit here) |
 
 ## Prerequisites
 
