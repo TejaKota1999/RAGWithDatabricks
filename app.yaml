@@ -17,6 +17,10 @@ command:
   - "true"
 
 env:
+  # Name shown in the top-right badge. Change this to display a different name,
+  # or remove it to show the logged-in Databricks user instead.
+  - name: RAG_USER_NAME
+    value: "Teja Kota"
   # Which Vector Search index and serving endpoints the app should use.
   - name: RAG_INDEX_NAME
     value: "databricks_rag_dev.rag.document_chunks_index"

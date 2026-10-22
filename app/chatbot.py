@@ -55,6 +55,41 @@ PROFILE = os.environ.get("DATABRICKS_CONFIG_PROFILE")
 # COMMAND ----------
 # Page setup: browser tab title/icon, the on-page title, and a caption.
 st.set_page_config(page_title="RAG POC", page_icon="chat")
+
+
+# Work out whose name to show in the corner badge:
+#   1) RAG_USER_NAME env var if set (lets you pin a specific name), else
+#   2) the logged-in user forwarded by the Databricks App, else
+#   3) "Guest" (e.g. a plain local run).
+def _display_name():
+    name = os.environ.get("RAG_USER_NAME")
+    if name:
+        return name
+    try:
+        h = st.context.headers or {}
+        for key in ("X-Forwarded-Preferred-Username", "X-Forwarded-Email", "X-Forwarded-User"):
+            val = h.get(key)
+            if val:
+                return val.split("@")[0]       # show the name part, not the full email
+    except Exception:
+        pass
+    return "Guest"
+
+
+# Render a styled name badge fixed to the top-right corner.
+st.markdown(
+    f"""
+    <div style="position:fixed; top:0.75rem; right:1.25rem; z-index:1000;
+                background:linear-gradient(135deg,#6366f1,#8b5cf6);
+                color:#ffffff; padding:6px 16px; border-radius:999px;
+                font-weight:600; font-size:0.9rem;
+                box-shadow:0 2px 8px rgba(0,0,0,0.25);">
+        &#128100; {_display_name()}
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("Company Knowledge Assistant")
 st.caption("RAG on Databricks Free Edition. Answers are grounded in retrieved documents.")
 
