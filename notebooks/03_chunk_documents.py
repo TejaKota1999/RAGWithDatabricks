@@ -40,6 +40,8 @@ dbutils.widgets.text("min_chunk_chars", "60", "7. Min chars to keep a chunk")
 dbutils.widgets.dropdown("write_mode", "overwrite", ["overwrite", "append"], "8. Write mode")
 # Whether to actually save the chunks to Delta, or just preview them.
 dbutils.widgets.dropdown("save_chunks", "true", ["true", "false"], "9. Save chunks to Delta")
+# Incremental: only chunk documents that are new or changed (skip already-chunked).
+dbutils.widgets.dropdown("incremental", "true", ["true", "false"], "10. Incremental (only new/changed)")
 
 print("Widgets declared.")
 
@@ -62,6 +64,8 @@ MIN_CHUNK_CHARS = int(dbutils.widgets.get("min_chunk_chars"))
 WRITE_MODE = dbutils.widgets.get("write_mode")
 # True only when the dropdown says "true".
 SAVE_CHUNKS = dbutils.widgets.get("save_chunks") == "true"
+# When true, only chunk new/changed documents (skip ones already in the chunks table).
+INCREMENTAL = dbutils.widgets.get("incremental") == "true"
 
 # Make sure the key names are not blank.
 for name, value in {"catalog": CATALOG, "schema": SCHEMA, "source_table": SOURCE_TABLE}.items():
@@ -101,6 +105,19 @@ src_rows = spark.table(SOURCE_FQN).select(*source_cols).collect()
 print(f"{len(src_rows)} cleaned row(s) loaded from {SOURCE_FQN}")
 # Stop early with a clear message if Phase 2 has not been run.
 assert src_rows, f"{SOURCE_FQN} is empty. Run Phase 2 first."
+
+# INCREMENTAL: keep only documents that are NOT already chunked. A document counts
+# as "already chunked" if its content_hash is already in the chunks table. New
+# documents (new hash) and changed documents (different hash) are kept.
+if INCREMENTAL and spark.catalog.tableExists(CHUNKS_FQN):
+    existing_hashes = {
+        r["content_hash"]
+        for r in spark.table(CHUNKS_FQN).select("content_hash").distinct().collect()
+    }
+    before = len(src_rows)
+    src_rows = [r for r in src_rows if r["content_hash"] not in existing_hashes]
+    print(f"incremental: {before - len(src_rows)} document(s) already chunked; "
+          f"{len(src_rows)} new/changed to process")
 
 # COMMAND ----------
 
@@ -218,8 +235,15 @@ for r in src_rows:
 # Report how many chunks we built and how many tiny fragments were dropped.
 print(f"chunks built : {len(chunk_rows)}")
 print(f"dropped small: {dropped_small}")
-# Stop if nothing was produced.
-assert chunk_rows, "No chunks produced. Check chunk_size / min_chunk_chars and the source text."
+# Stop if nothing was produced - unless we are incremental and there was simply
+# nothing new to chunk (a normal, successful outcome).
+if not chunk_rows:
+    if INCREMENTAL:
+        print("No new or changed documents -> nothing to chunk.")
+    else:
+        raise AssertionError(
+            "No chunks produced. Check chunk_size / min_chunk_chars and the source text."
+        )
 
 # COMMAND ----------
 
@@ -251,13 +275,17 @@ chunks_schema = StructType(
     ]
 )
 
-# Turn the list of chunk dictionaries into a Spark DataFrame.
-chunks_df = spark.createDataFrame(chunk_rows, schema=chunks_schema)
-# Show how many chunks each document produced.
-print("per-document chunk counts:")
-chunks_df.groupBy("document_id").count().orderBy("document_id").show(truncate=False)
-# Display the chunks in reading order (by document, then chunk index).
-display(chunks_df.orderBy("document_id", "chunk_index"))
+# Turn the list of chunk dictionaries into a Spark DataFrame (skip if nothing new).
+if chunk_rows:
+    chunks_df = spark.createDataFrame(chunk_rows, schema=chunks_schema)
+    # Show how many chunks each document produced.
+    print("per-document chunk counts:")
+    chunks_df.groupBy("document_id").count().orderBy("document_id").show(truncate=False)
+    # Display the chunks in reading order (by document, then chunk index).
+    display(chunks_df.orderBy("document_id", "chunk_index"))
+else:
+    chunks_df = None
+    print("No chunks to build (incremental: nothing new).")
 
 # COMMAND ----------
 
@@ -266,10 +294,21 @@ display(chunks_df.orderBy("document_id", "chunk_index"))
 
 # COMMAND ----------
 
-# Only write if the save_chunks widget is "true".
-if SAVE_CHUNKS:
-    # Save the DataFrame as a Delta table.
-    (chunks_df.write.mode(WRITE_MODE).saveAsTable(CHUNKS_FQN))
-    print(f"Saved chunks to {CHUNKS_FQN} (mode={WRITE_MODE}), rows={chunks_df.count()}")
+# Only write if the save_chunks widget is "true" and we produced new chunks.
+if SAVE_CHUNKS and chunks_df is not None:
+    if INCREMENTAL and spark.catalog.tableExists(CHUNKS_FQN):
+        # Upsert: delete any OLD chunks for the documents we just processed (handles a
+        # changed document), then APPEND the new chunks. Other documents are untouched.
+        doc_ids = {r["document_id"] for r in chunk_rows}
+        id_list = ", ".join("'" + d.replace("'", "''") + "'" for d in doc_ids)
+        spark.sql(f"DELETE FROM {CHUNKS_FQN} WHERE document_id IN ({id_list})")
+        chunks_df.write.mode("append").saveAsTable(CHUNKS_FQN)
+        print(f"Incremental: appended {chunks_df.count()} chunk(s) for {len(doc_ids)} document(s)")
+    else:
+        # First run (or incremental off): write the whole table using the chosen mode.
+        (chunks_df.write.mode(WRITE_MODE).saveAsTable(CHUNKS_FQN))
+        print(f"Saved chunks to {CHUNKS_FQN} (mode={WRITE_MODE}), rows={chunks_df.count()}")
+elif chunks_df is None:
+    print("Nothing new to save (incremental).")
 else:
     print("save_chunks=false -> chunks not persisted")

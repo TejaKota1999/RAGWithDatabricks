@@ -40,6 +40,8 @@ dbutils.widgets.text("cleaned_table", "documents_cleaned", "7. Cleaned table nam
 dbutils.widgets.dropdown("write_mode", "overwrite", ["overwrite", "append"], "8. Cleaned write mode")
 # Whether to actually save the cleaned text to Delta, or just preview it.
 dbutils.widgets.dropdown("save_cleaned", "true", ["true", "false"], "9. Save cleaned to Delta")
+# Incremental: only process NEW or CHANGED files (skip already-processed ones).
+dbutils.widgets.dropdown("incremental", "true", ["true", "false"], "10. Incremental (only new/changed)")
 
 # Print a confirmation so you know the widgets were created.
 print("Widgets declared.")
@@ -71,6 +73,8 @@ CLEANED_TABLE = dbutils.widgets.get("cleaned_table").strip()
 WRITE_MODE = dbutils.widgets.get("write_mode")
 # Compare the dropdown text to "true" so SAVE_CLEANED becomes a real True/False value.
 SAVE_CLEANED = dbutils.widgets.get("save_cleaned") == "true"
+# When true, skip files whose content was already processed (cost-saving).
+INCREMENTAL = dbutils.widgets.get("incremental") == "true"
 
 # Safety check: catalog, schema, and volume must not be blank. If one is, stop with a clear message.
 for required_name, required_value in {"catalog": CATALOG, "schema": SCHEMA, "volume": VOLUME}.items():
@@ -219,13 +223,18 @@ print("Helpers defined.")
 
 # COMMAND ----------
 
+# datetime helps turn the file's modification time (epoch ms) into a readable date.
+from datetime import datetime, timezone
+
 # dbutils.fs.ls lists everything at the path; keep only real files (drop sub-folders).
 source_files = [e for e in dbutils.fs.ls(SOURCE_PATH) if not e.isDir()]
 # Show how many files were found.
 print(f"{len(source_files)} file(s) under {SOURCE_PATH}")
-# Print each file's name and size so you can see what will be processed.
+# Print each file's name, size, and last-modified time (the upload timestamp).
 for e in source_files:
-    print(" ", e.name, "-", e.size, "bytes")
+    # modificationTime is milliseconds since 1970; convert to a UTC date string.
+    mod = datetime.fromtimestamp(e.modificationTime / 1000, tz=timezone.utc).isoformat()
+    print(" ", e.name, "-", e.size, "bytes - modified", mod)
 
 # COMMAND ----------
 
@@ -245,6 +254,19 @@ rows = []                 # successful cleaned rows
 skipped_unsupported = []  # files whose type we do not handle
 empty_or_short = []       # files/pages that were empty or too short
 failures = []             # files that raised an error while parsing
+skipped_existing = []     # files already processed (incremental mode)
+
+# INCREMENTAL: load the fingerprints of files already processed, so we can skip
+# them. A file is "already processed" if its exact content_hash is already in the
+# cleaned table. New files (new hash) and changed files (different hash) are NOT
+# skipped, so they still get processed.
+existing_hashes = set()
+if INCREMENTAL and spark.catalog.tableExists(CLEANED_FQN):
+    existing_hashes = {
+        r["content_hash"]
+        for r in spark.table(CLEANED_FQN).select("content_hash").distinct().collect()
+    }
+    print(f"incremental: {len(existing_hashes)} already-processed file fingerprint(s) found")
 
 # Go through each file we found in Cell 5.
 for entry in source_files:
@@ -260,6 +282,11 @@ for entry in source_files:
         # Read the raw bytes once to compute a SHA-256 fingerprint (detects future changes).
         with open(local_path, "rb") as f:
             content_hash = hashlib.sha256(f.read()).hexdigest()
+
+        # INCREMENTAL: if this exact content was already processed, skip it (no cost).
+        if content_hash in existing_hashes:
+            skipped_existing.append(file_name)
+            continue
 
         # Extract the file's text (one loop pass per page for PDFs, one pass otherwise).
         for page_number, raw in extract_pages(local_path, ext):
@@ -287,6 +314,7 @@ for entry in source_files:
 
 # Summaries so you can see exactly what happened.
 print(f"cleaned rows        : {len(rows)}")
+print(f"skipped (already done): {skipped_existing}")
 print(f"skipped unsupported : {skipped_unsupported}")
 print(f"empty/short         : {empty_or_short}")
 print(f"failures            : {failures}")
@@ -323,15 +351,23 @@ cleaned_schema = StructType(
     ]
 )
 
-# If nothing was extracted, stop with a helpful message instead of writing an empty table.
-assert rows, (
-    f"No text extracted from {SOURCE_PATH}. "
-    f"Check failures above, supported_extensions, and min_chars."
-)
-# Turn the list of row-dictionaries into a Spark DataFrame (a table in memory).
-cleaned_df = spark.createDataFrame(rows, schema=cleaned_schema)
-# display() shows the table nicely in the notebook UI.
-display(cleaned_df)
+# In incremental mode, "no new rows" is a normal, successful outcome (every file was
+# already processed), so we do not error - we just skip writing. In full mode, an empty
+# result means something is wrong, so we stop with a helpful message.
+if not rows:
+    if INCREMENTAL:
+        print("No new or changed files -> nothing to write (all files already processed).")
+        cleaned_df = None
+    else:
+        raise AssertionError(
+            f"No text extracted from {SOURCE_PATH}. "
+            f"Check failures above, supported_extensions, and min_chars."
+        )
+else:
+    # Turn the list of row-dictionaries into a Spark DataFrame (a table in memory).
+    cleaned_df = spark.createDataFrame(rows, schema=cleaned_schema)
+    # display() shows the table nicely in the notebook UI.
+    display(cleaned_df)
 
 # COMMAND ----------
 
@@ -340,12 +376,23 @@ display(cleaned_df)
 
 # COMMAND ----------
 
-# Only write to Delta if the save_cleaned widget was "true".
-if SAVE_CLEANED:
-    # .write.mode(...).saveAsTable(...) stores the DataFrame as a managed Delta table.
-    (cleaned_df.write.mode(WRITE_MODE).saveAsTable(CLEANED_FQN))
-    # .count() re-reads the table to confirm how many rows landed.
-    print(f"Saved cleaned text to {CLEANED_FQN} (mode={WRITE_MODE}), rows={cleaned_df.count()}")
+# Only write to Delta if the save_cleaned widget was "true" and we have new rows.
+if SAVE_CLEANED and cleaned_df is not None:
+    if INCREMENTAL and spark.catalog.tableExists(CLEANED_FQN):
+        # Upsert: remove any OLD version of the documents we just processed (handles a
+        # changed file), then APPEND the new rows. Untouched documents stay as they are.
+        doc_ids = {r["document_id"] for r in rows}
+        id_list = ", ".join("'" + d.replace("'", "''") + "'" for d in doc_ids)
+        spark.sql(f"DELETE FROM {CLEANED_FQN} WHERE document_id IN ({id_list})")
+        cleaned_df.write.mode("append").saveAsTable(CLEANED_FQN)
+        print(f"Incremental: appended {cleaned_df.count()} new/changed row(s) to {CLEANED_FQN}")
+    else:
+        # First run (or incremental off): write the whole table using the chosen mode.
+        (cleaned_df.write.mode(WRITE_MODE).saveAsTable(CLEANED_FQN))
+        print(f"Saved cleaned text to {CLEANED_FQN} (mode={WRITE_MODE}), rows={cleaned_df.count()}")
+elif cleaned_df is None:
+    # Incremental run with nothing new -> nothing to write (expected, not an error).
+    print("Nothing new to save (incremental).")
 else:
     # Otherwise just tell the user nothing was written.
     print("save_cleaned=false -> cleaned text not persisted")

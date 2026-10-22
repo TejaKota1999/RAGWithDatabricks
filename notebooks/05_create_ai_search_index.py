@@ -271,9 +271,15 @@ elif _index_exists(INDEX_FQN) and RECREATE_INDEX:
             break
         time.sleep(5)
     _create_index()
-# If it exists and we were NOT asked to recreate, reuse it.
+# If it exists and we were NOT asked to recreate, trigger a SYNC so the index
+# picks up any new/changed rows added by an incremental notebook-04 run.
 elif _index_exists(INDEX_FQN):
-    print(f"index '{INDEX_FQN}' already exists (set recreate_index=true to rebuild for a new dimension)")
+    print(f"index '{INDEX_FQN}' already exists -> triggering a sync to pick up new/changed rows ...")
+    try:
+        w.vector_search_indexes.sync_index(INDEX_FQN)   # pulls the latest from the source table
+        print("sync triggered (set recreate_index=true instead if the dimension changed)")
+    except Exception as exc:
+        print("could not trigger sync:", exc)
 # Otherwise create it fresh.
 else:
     _create_index()

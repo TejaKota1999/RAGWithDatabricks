@@ -92,8 +92,23 @@ Run order (each reads the previous table):
 2. `03_chunk_documents` → `document_chunks`
 3. `04_generate_embeddings` → `document_embeddings` (1024-dim, CDF on)
 4. `05_create_ai_search_index` → Vector Search index
-   - Set `create_resources=true` to build it.
+   - Set `create_resources=true` to build it (or to sync an existing one).
    - Set `recreate_index=true` to rebuild after an embedding-dimension change.
+   - If the index already exists, re-running 05 **triggers a sync** to pick up new rows.
+
+### Incremental processing (cost control)
+
+Notebooks 02–04 are **incremental by default** (`incremental=true`): they process
+**only new or changed documents** and skip anything already done, keyed on each
+file's `content_hash`. So uploading one new file to the volume and re-running the
+pipeline embeds **only that file** — existing documents are never re-embedded
+(the embedding endpoint is the metered cost). A changed file (new content, new
+hash) is re-processed for that document only. Set `incremental=false` to force a
+full rebuild. After an incremental run, re-run 05 to sync the index.
+
+Note: incremental handles **added and changed** files. Deleting a file from the
+volume does **not** remove its rows automatically — delete those rows explicitly
+if needed.
 
 Remove the managed index/endpoint when done:
 
