@@ -203,6 +203,31 @@ def _index_exists(name):
         return False                                                                  # error -> does not exist
 
 
+# Helper: trigger a sync and WAIT for it to finish. A Delta Sync index rejects a
+# sync while a previous one is still RUNNING, so we RETRY until it is accepted
+# (swallowing that error is what previously left new rows un-indexed), then poll
+# until the row count stops changing.
+def _sync_and_wait():
+    for _ in range(30):                                 # retry (~10 min) until the sync is accepted
+        try:
+            w.vector_search_indexes.sync_index(INDEX_FQN)
+            print("sync triggered")
+            break
+        except Exception as exc:                        # not COMPLETED/FAILED/CANCELED yet -> wait + retry
+            print("index busy, waiting to sync ...", str(exc)[:90])
+            time.sleep(20)
+    last = -1                                           # wait until the indexed row count is stable
+    for _ in range(90):                                 # up to ~15 min
+        st = w.vector_search_indexes.get_index(INDEX_FQN).status
+        n = (st.indexed_row_count if st else 0) or 0
+        if st and st.ready and n == last:               # ready AND unchanged since last check -> done
+            print("index synced, indexed rows:", n)
+            return
+        last = n
+        time.sleep(10)
+    print("index sync still finishing; it will complete shortly.")
+
+
 # Helper: create the managed-embeddings index and wait until it is ready.
 def _create():
     print(f"creating managed-embeddings index {INDEX_FQN} (embeds via {EMBEDDING_ENDPOINT}) ...")
@@ -242,12 +267,9 @@ elif _index_exists(INDEX_FQN) and RECREATE_INDEX:
         time.sleep(5)
     _create()
 elif _index_exists(INDEX_FQN):
-    # Already exists -> just sync it so it picks up new/changed rows (incremental).
-    print("index exists -> triggering a sync to pick up new/changed rows ...")
-    try:
-        w.vector_search_indexes.sync_index(INDEX_FQN)
-    except Exception as exc:
-        print("sync:", exc)
+    # Already exists -> sync it (robustly) so it picks up new/changed rows.
+    print("index exists -> syncing to pick up new/changed rows ...")
+    _sync_and_wait()
 else:
     # First time -> create it.
     _create()
