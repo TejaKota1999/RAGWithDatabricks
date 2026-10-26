@@ -6,7 +6,7 @@ and context, and the system prompt enforces grounding + abstention.
 """
 
 # The prompt pieces under test.
-from src.prompt_templates import (
+from src.serving.prompt_templates import (
     ABSTAIN_MESSAGE,
     SYSTEM_PROMPT,
     build_user_prompt,

@@ -6,7 +6,7 @@ citation precision (did the answer cite real retrieved chunks).
 """
 
 # The scoring functions under test.
-from src.evaluation import (
+from src.offline.evaluation import (
     citation_precision,
     extract_citations,
     groundedness,

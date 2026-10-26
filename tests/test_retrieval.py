@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 # The retriever class under test (the local fallback / testable one).
-from src.retriever import FaissRetriever
+from src.serving.retriever import FaissRetriever
 
 
 # Helper: build a small 3-vector index with known chunk metadata.

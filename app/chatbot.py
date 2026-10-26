@@ -36,10 +36,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import streamlit as st
 
 # Our building blocks (all Databricks-backed by default).
-from src.llm import DEFAULT_ENDPOINT as DEFAULT_CHAT_ENDPOINT
-from src.llm import DatabricksChatClient, LLMUnavailableError
-from src.rag_chain import RagChain
-from src.retriever import VectorSearchTextRetriever
+from src.serving.llm import DEFAULT_ENDPOINT as DEFAULT_CHAT_ENDPOINT
+from src.serving.llm import DatabricksChatClient, LLMUnavailableError
+from src.serving.rag_chain import RagChain
+from src.serving.retriever import VectorSearchTextRetriever
 
 # COMMAND ----------
 # Read configuration from environment variables, with defaults for this project.

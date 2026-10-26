@@ -55,7 +55,7 @@ class DatabricksChatClient:
     # Create (once) the Databricks client used to call the endpoint.
     def _ws(self):
         if self._client is None:
-            from src.databricks_client import get_workspace_client
+            from src.serving.databricks_client import get_workspace_client
 
             self._client = get_workspace_client(self.profile)
         return self._client

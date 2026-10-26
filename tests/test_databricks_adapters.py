@@ -13,9 +13,9 @@ from types import SimpleNamespace
 import pytest
 
 # The Databricks adapters under test.
-from src.embedder import DatabricksEmbedder
-from src.llm import DatabricksChatClient, LLMUnavailableError
-from src.retriever import VectorSearchRetriever, VectorSearchTextRetriever
+from src.offline.embedder import DatabricksEmbedder
+from src.serving.llm import DatabricksChatClient, LLMUnavailableError
+from src.serving.retriever import VectorSearchRetriever, VectorSearchTextRetriever
 
 
 # ---------------------------------------------------------------------------

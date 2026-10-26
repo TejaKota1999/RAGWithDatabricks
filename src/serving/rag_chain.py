@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Callable, Protocol
 
 # Prompt text and the standard "I can't answer" message come from prompt_templates.
-from src.prompt_templates import ABSTAIN_MESSAGE, SYSTEM_PROMPT, build_user_prompt
+from src.serving.prompt_templates import ABSTAIN_MESSAGE, SYSTEM_PROMPT, build_user_prompt
 
 
 # Describes any retriever we accept: it must have a .search(...) method.

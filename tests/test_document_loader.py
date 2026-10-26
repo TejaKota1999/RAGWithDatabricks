@@ -6,7 +6,7 @@ and that extract_text rejects unknown file types. No Databricks is involved.
 """
 
 # The two functions under test.
-from src.document_loader import extract_text, load_documents
+from src.offline.document_loader import extract_text, load_documents
 
 
 # .txt and .md files should be loaded with text + metadata (content_hash, path).

@@ -6,7 +6,7 @@ No Databricks is involved - the inputs are written right here in the tests.
 """
 
 # Import the one function we are testing.
-from src.text_cleaning import clean_text
+from src.offline.text_cleaning import clean_text
 
 
 # Trailing spaces should be removed and Windows line endings (\r\n) become \n.

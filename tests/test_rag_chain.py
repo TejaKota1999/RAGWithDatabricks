@@ -10,9 +10,9 @@ import numpy as np
 import pytest
 
 # The abstain message, the chain under test, and the local retriever used as a stand-in.
-from src.prompt_templates import ABSTAIN_MESSAGE
-from src.rag_chain import RagChain
-from src.retriever import FaissRetriever
+from src.serving.prompt_templates import ABSTAIN_MESSAGE
+from src.serving.rag_chain import RagChain
+from src.serving.retriever import FaissRetriever
 
 
 # A fake LLM that just returns a fixed answer and remembers what it was sent.

@@ -13,10 +13,10 @@ for the chat app.
 from __future__ import annotations
 
 # The building blocks from the other modules.
-from src.chunker import build_chunks
-from src.document_loader import load_documents
-from src.embedder import DatabricksEmbedder, LocalEmbedder
-from src.retriever import FaissRetriever, VectorSearchRetriever
+from src.offline.chunker import build_chunks
+from src.offline.document_loader import load_documents
+from src.offline.embedder import DatabricksEmbedder, LocalEmbedder
+from src.serving.retriever import FaissRetriever, VectorSearchRetriever
 
 
 # COMMAND ----------

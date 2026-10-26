@@ -6,7 +6,7 @@ All inputs are invented here; no Databricks or files are read.
 """
 
 # The three functions under test.
-from src.chunker import build_chunks, chunk_document, detect_section
+from src.offline.chunker import build_chunks, chunk_document, detect_section
 
 
 # A short text that fits in one chunk should come back as a single chunk.

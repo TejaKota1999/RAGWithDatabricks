@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # Reuse the exact same cleaning function as the notebook.
-from src.text_cleaning import clean_text
+from src.offline.text_cleaning import clean_text
 
 # File types we know how to read.
 SUPPORTED_EXTENSIONS = ("txt", "md", "pdf", "docx")
