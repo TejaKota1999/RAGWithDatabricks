@@ -190,6 +190,16 @@ live workspace if anything looks stale.
     give a cautious soft-decline; it does not hallucinate policies. Use a
     larger chat model or stricter post-processing if crisper abstention is
     required.
+-   **Multi-topic single query:** the 8B model reliably answers a question about
+    ONE policy ("What is the iPhone replacement policy?", "What is the Samsung
+    device policy?") but tends to abstain when a SINGLE query asks it to summarize
+    two different policies at once ("the iPhone **and** Samsung policies"), even
+    though both docs are retrieved. The prompt was tuned to answer broad
+    single-topic questions; the two-at-once case is a small-model synthesis limit.
+    Workaround (works well): ask one policy at a time - conversational memory lets
+    the second be a natural follow-up ("and the Samsung one?" is reformulated to
+    "What is the Samsung replacement policy?"). A larger chat model removes the
+    limit.
 
 ## Intended use case
 
