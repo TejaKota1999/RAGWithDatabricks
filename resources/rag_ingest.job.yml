@@ -6,16 +6,23 @@
 # defaults are only a fallback for an ad-hoc manual run of a notebook by itself
 # (outside the job); whenever this runs as the `rag_ingest` job, every value below
 # (and only these) is what actually gets used.
+#
+# Every `default:` below reads a bundle VARIABLE (declared in databricks.yml), not
+# a literal - so the actual value used depends on the TARGET this is deployed with
+# (`-t dev` vs `-t prod`). See databricks.yml's `variables:`/`targets:` blocks to
+# change an environment's value or to add a new environment.
 resources:
   jobs:
     rag_ingest:
       name: "[${bundle.target}] RAG Ingest Pipeline"
       parameters:
         - name: catalog
-          default: databricks_rag_dev
+          default: ${var.catalog}
         - name: schema
-          default: rag
+          default: ${var.schema}
         # "true" = incremental (only new/changed docs); "false" = full rebuild.
+        # A run-time toggle, not an environment setting, so it is the same
+        # literal in every target (override it per-run with --params instead).
         - name: incremental
           default: "true"
         # Create/sync the Vector Search index (maps to 05 create_resources).
@@ -28,83 +35,83 @@ resources:
         # --- 02_extract_and_clean ---
         # UC volume (under catalog.schema) holding the source documents.
         - name: volume
-          default: "source_docs"
+          default: ${var.volume}
         # Optional sub-path filter inside the volume ("" = whole volume).
         - name: source_path
-          default: ""
+          default: ${var.source_path}
         # File extensions 02 will parse; anything else is skipped.
         - name: supported_extensions
-          default: "pdf,txt,md,docx"
+          default: ${var.supported_extensions}
         # Drop any extracted document shorter than this many characters.
         - name: min_chars
-          default: "20"
+          default: ${var.min_chars}
         # Output Delta table for cleaned/extracted text (02's output).
         - name: cleaned_table
-          default: "documents_cleaned"
+          default: ${var.cleaned_table}
         # Persist the cleaned table to Delta ("true") vs. preview only ("false").
         - name: save_cleaned
-          default: "true"
+          default: ${var.save_cleaned}
 
         # --- 03_chunk_documents / 04_generate_embeddings (shared table name) ---
         # Output Delta table for chunks (03's output, 04's input).
         - name: chunks_table
-          default: "document_chunks"
+          default: ${var.custom_chunks_table}
         # Target characters per chunk.
         - name: chunk_size
-          default: "1000"
+          default: ${var.chunk_size}
         # Overlap (characters) between consecutive chunks.
         - name: chunk_overlap
-          default: "150"
+          default: ${var.chunk_overlap}
         # Drop any chunk shorter than this many characters (avoids noise chunks).
         - name: min_chunk_chars
-          default: "60"
+          default: ${var.min_chunk_chars}
         # Persist the chunks table to Delta ("true") vs. preview only ("false").
         - name: save_chunks
-          default: "true"
+          default: ${var.save_chunks}
 
         # --- 04_generate_embeddings ---
         # Output Delta table for embeddings (04's output, 05's input).
         - name: embeddings_table
-          default: "document_embeddings"
+          default: ${var.embeddings_table}
         # Databricks embedding serving endpoint (self-managed path, 1024-dim).
         - name: embedding_endpoint
-          default: "databricks-qwen3-embedding-0-6b"
+          default: ${var.custom_embedding_endpoint}
         # How many chunks to embed per API call to the serving endpoint.
         - name: batch_size
-          default: "16"
+          default: ${var.batch_size}
         # L2-normalize embedding vectors before storing them.
         - name: normalize
-          default: "true"
+          default: ${var.normalize}
         # Persist the embeddings table to Delta ("true") vs. preview only ("false").
         - name: save_embeddings
-          default: "true"
+          default: ${var.save_embeddings}
 
         # --- Shared write mode (02/03/04 each overwrite their output table) ---
         - name: write_mode
-          default: "overwrite"
+          default: ${var.write_mode}
 
         # --- 05_create_ai_search_index ---
         # The self-managed (vector-column) Vector Search index name.
         - name: index_table
-          default: "document_chunks_index"
+          default: ${var.custom_index_table}
         # Vector Search endpoint that hosts the index.
         - name: endpoint_name
-          default: "rag_poc_vs"
+          default: ${var.vs_endpoint_name}
         # STANDARD (serverless-friendly) vs other Vector Search endpoint tiers.
         - name: endpoint_type
-          default: "STANDARD"
+          default: ${var.endpoint_type}
         # Unique-id column in the embeddings table (index primary key).
         - name: primary_key
-          default: "chunk_id"
+          default: ${var.primary_key}
         # Column in the embeddings table holding the 1024-dim vector.
         - name: embedding_column
-          default: "embedding"
+          default: ${var.embedding_column}
         # Must match the embedding endpoint's output dimension.
         - name: embedding_dim
-          default: "1024"
+          default: ${var.embedding_dim}
         # TRIGGERED = sync on demand (vs CONTINUOUS, which stays always-on).
         - name: pipeline_type
-          default: "TRIGGERED"
+          default: ${var.pipeline_type}
 
       tasks:
         # 1) Extract + clean text from the volume -> documents_cleaned

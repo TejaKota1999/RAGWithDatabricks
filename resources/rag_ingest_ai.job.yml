@@ -6,31 +6,38 @@
 # own widget defaults are only a fallback for an ad-hoc manual run of the notebook
 # itself (outside the job); whenever this runs as the `rag_ingest_ai` job, every
 # value below (and only these) is what actually gets used.
+#
+# Every `default:` below reads a bundle VARIABLE (declared in databricks.yml), not
+# a literal - so the actual value used depends on the TARGET this is deployed with
+# (`-t dev` vs `-t prod`). See databricks.yml's `variables:`/`targets:` blocks to
+# change an environment's value or to add a new environment.
 resources:
   jobs:
     rag_ingest_ai:
       name: "[${bundle.target}] RAG Ingest (AI Functions)"
       parameters:
         - name: catalog
-          default: databricks_rag_dev
+          default: ${var.catalog}
         - name: schema
-          default: rag
+          default: ${var.schema}
         # UC volume (under catalog.schema) holding the source documents.
         - name: volume
-          default: "source_docs"
+          default: ${var.volume}
         # Output Delta table for the ai_prep_search chunks.
         - name: chunks_table
-          default: "document_chunks_ai"
+          default: ${var.ai_chunks_table}
         # Vector Search endpoint that hosts the index.
         - name: endpoint_name
-          default: "rag_poc_vs"
+          default: ${var.vs_endpoint_name}
         # The managed-embeddings Vector Search index name.
         - name: index_table
-          default: "document_chunks_ai_index"
+          default: ${var.ai_index_table}
         # Serving endpoint the MANAGED index uses to embed chunk_to_embed + queries.
         - name: embedding_endpoint
-          default: "databricks-gte-large-en"
-        # "true" = only new/changed files; "false" = full rebuild.
+          default: ${var.ai_embedding_endpoint}
+        # "true" = only new/changed files; "false" = full rebuild. A run-time
+        # toggle, not an environment setting, so it is the same literal in every
+        # target (override it per-run with --params instead).
         - name: incremental
           default: "true"
         # Create/sync the managed Vector Search index as part of the run.

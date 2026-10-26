@@ -1,7 +1,8 @@
 # Databricks Asset Bundle for the RAG POC.
 # Pipeline (job) definitions live in separate files under resources/ and are
 # pulled in via the `include` directive below. Edit those files to change a
-# pipeline. Credentials come from the CLI profile; do not add tokens here.
+# pipeline's TASKS; edit the `variables:` block below (or a target's override)
+# to change WHICH catalog/schema/tables/endpoints a pipeline points at.
 bundle:
   name: rag-poc
 
@@ -9,10 +10,120 @@ bundle:
 include:
   - resources/*.yml
 
+# --------------------------------------------------------------------------
+# Environment variables (bundle-level): every job parameter default in
+# resources/*.yml reads from one of these via ${var.<name>} instead of a
+# literal string, so there is ONE place to change a value for an environment.
+# A target overrides only the ones that genuinely differ for that environment
+# (see `targets:` below) - everything else falls back to the default here.
+#
+# Adding a THIRD environment later (e.g. staging) needs NO changes to any
+# resources/*.yml file: just add a new `targets: staging: variables: {...}`
+# block below, overriding only what differs (typically just `catalog`, plus
+# `workspace.host`/`profile` if it is a separate workspace).
+# --------------------------------------------------------------------------
 variables:
   prod_host:
     description: Workspace URL for the prod target (set before running -t prod)
     default: ""
+
+  # --- Shared across all pipelines (same meaning everywhere they're used) ---
+  catalog:
+    description: Unity Catalog catalog for this environment
+    default: databricks_rag_dev
+  schema:
+    description: Schema inside the catalog
+    default: rag
+  volume:
+    description: UC volume (under catalog.schema) holding the source documents
+    default: source_docs
+  vs_endpoint_name:
+    description: Vector Search endpoint that hosts both indexes
+    default: rag_poc_vs
+
+  # --- AI Functions pipeline (notebook 10 / job rag_ingest_ai) ---
+  ai_chunks_table:
+    description: ai_prep_search output chunks table (AI pipeline)
+    default: document_chunks_ai
+  ai_index_table:
+    description: Managed-embeddings Vector Search index name (AI pipeline)
+    default: document_chunks_ai_index
+  ai_embedding_endpoint:
+    description: Serving endpoint the MANAGED index uses to embed + query
+    default: databricks-gte-large-en
+
+  # --- Custom pipeline (notebooks 02-05 / job rag_ingest) ---
+  source_path:
+    description: Optional sub-path filter inside the volume ("" = whole volume)
+    default: ""
+  supported_extensions:
+    description: File extensions 02 will parse
+    default: "pdf,txt,md,docx"
+  min_chars:
+    description: Drop any extracted document shorter than this many characters
+    default: "20"
+  cleaned_table:
+    description: Output Delta table for cleaned/extracted text (02's output)
+    default: documents_cleaned
+  save_cleaned:
+    description: Persist the cleaned table to Delta
+    default: "true"
+  custom_chunks_table:
+    description: Output Delta table for chunks (03's output, 04's input, custom pipeline)
+    default: document_chunks
+  chunk_size:
+    description: Target characters per chunk
+    default: "1000"
+  chunk_overlap:
+    description: Overlap (characters) between consecutive chunks
+    default: "150"
+  min_chunk_chars:
+    description: Drop any chunk shorter than this many characters
+    default: "60"
+  save_chunks:
+    description: Persist the chunks table to Delta
+    default: "true"
+  embeddings_table:
+    description: Output Delta table for embeddings (04's output, 05's input)
+    default: document_embeddings
+  custom_embedding_endpoint:
+    description: Self-managed embedding endpoint (custom pipeline, 1024-dim)
+    default: databricks-qwen3-embedding-0-6b
+  batch_size:
+    description: How many chunks to embed per API call
+    default: "16"
+  normalize:
+    description: L2-normalize embedding vectors before storing them
+    default: "true"
+  save_embeddings:
+    description: Persist the embeddings table to Delta
+    default: "true"
+  write_mode:
+    description: Write mode shared by 02/03/04's output tables
+    default: overwrite
+  custom_index_table:
+    description: Self-managed (vector-column) Vector Search index name
+    default: document_chunks_index
+  endpoint_type:
+    description: Vector Search endpoint tier
+    default: STANDARD
+  primary_key:
+    description: Unique-id column in the embeddings table (index primary key)
+    default: chunk_id
+  embedding_column:
+    description: Column in the embeddings table holding the vector
+    default: embedding
+  embedding_dim:
+    description: Must match the embedding endpoint's output dimension
+    default: "1024"
+  pipeline_type:
+    description: TRIGGERED (sync on demand) vs CONTINUOUS
+    default: TRIGGERED
+
+  # --- Test pipeline (job rag_tests) ---
+  test_log_table:
+    description: Delta table that receives one row per test run
+    default: test_log
 
 targets:
   dev:
@@ -21,9 +132,18 @@ targets:
     workspace:
       host: https://dbc-c4b8c8d6-ec5b.cloud.databricks.com
       profile: sairam
+    # No overrides: dev uses every default above as-is (this IS the verified
+    # live workspace state - see CLAUDE.md's "Workspace facts").
 
   prod:
     mode: production
     workspace:
       host: ${var.prod_host}
       profile: sairam
+    variables:
+      # Only the catalog differs for prod - same schema/tables/endpoints, so a
+      # prod run is fully isolated from dev by catalog alone (standard Unity
+      # Catalog multi-environment pattern). NOT YET PROVISIONED: this catalog
+      # does not exist on the Free Edition workspace yet; create it (and set
+      # `prod_host` above, or via --var) before deploying/running this target.
+      catalog: databricks_rag_prod

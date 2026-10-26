@@ -1,16 +1,20 @@
 # Test pipeline: runs the pytest suite on serverless and logs per-test results
 # to the test_log Delta table. Every notebook widget is supplied from this file.
+#
+# Every `default:` below reads a bundle VARIABLE (declared in databricks.yml), not
+# a literal - so tests run against (and log to) the right catalog/schema for
+# whichever target this is deployed with (`-t dev` vs `-t prod`).
 resources:
   jobs:
     rag_tests:
       name: "[${bundle.target}] RAG Tests"
       parameters:
         - name: catalog
-          default: databricks_rag_dev
+          default: ${var.catalog}
         - name: schema
-          default: rag
+          default: ${var.schema}
         - name: test_log_table
-          default: test_log
+          default: ${var.test_log_table}
       tasks:
         - task_key: run_tests
           notebook_task:

@@ -116,6 +116,35 @@ live workspace if anything looks stale.
     this Free Edition workspace.
 -   Databricks App: `rag-chatbot` (Streamlit).
 
+### Environments (dev / prod, and adding more later)
+
+-   Every catalog/schema/table/index/endpoint-name value used by the three jobs
+    below lives in ONE place: `databricks.yml`'s top-level `variables:` block.
+    Each `resources/*.job.yml` job parameter reads `default: ${var.<name>}`
+    instead of a literal, so the value actually used depends on which **target**
+    the bundle is deployed/run with (`-t dev` vs `-t prod`).
+-   `targets.dev` (the default, and the only one actually provisioned today)
+    overrides nothing - it uses every bundle-level default as-is, matching the
+    verified live workspace ("Workspace facts" above).
+-   `targets.prod` overrides only `catalog` (-> `databricks_rag_prod`) - same
+    schema/tables/endpoints as dev, isolated purely by Unity Catalog catalog
+    (the standard multi-environment UC pattern). **Not yet provisioned**: that
+    catalog does not exist on the Free Edition workspace, and `prod`'s
+    `workspace.host` is an empty variable (`prod_host`) until a real second
+    workspace exists - `databricks bundle validate -t prod` will fail until
+    both are set. This is intentional scaffolding, not a bug.
+-   Some parameters are deliberately NOT environment variables - `incremental`,
+    `create_index`, `recreate_index` stay a plain literal default in every
+    target, because they are per-run operational toggles (override them with
+    `--params` on a given run), not something that should differ by
+    environment.
+-   **To add a THIRD environment** (e.g. `staging`) later: add one new
+    `targets: staging: { workspace: {...}, variables: { catalog: ... } }` block
+    to `databricks.yml`, overriding only what genuinely differs (usually just
+    `catalog`, plus `workspace.host`/`profile` if it's a separate workspace).
+    **No edits to any `resources/*.job.yml` file are needed** - they already
+    read every value through `${var.*}`.
+
 ### Pipelines (Lakeflow Jobs in `databricks.yml`)
 
 -   **`rag_ingest`** - runs notebooks 02 -> 03 -> 04 -> 05 in order on
