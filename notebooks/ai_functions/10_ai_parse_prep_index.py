@@ -139,14 +139,21 @@ if INCREMENTAL and table_exists and has_hash:
         spark.sql(f"DROP TABLE IF EXISTS {STAGING}")
         spark.sql(f"CREATE TABLE {STAGING} AS {_chunks_sql('_new_files')}")           # parse/chunk new files once
 
-        # Build a literal IN-list of the processed paths (deterministic predicate).
-        in_list = ", ".join("'" + p.replace("'", "''") + "'" for p in new_paths)
-        # Remove any OLD rows for those files (handles a changed/overwritten file),
-        # then append the fresh chunks. Untouched files are left exactly as they are.
-        spark.sql(f"DELETE FROM {CHUNKS_FQN} WHERE source_path IN ({in_list})")
-        spark.sql(f"INSERT INTO {CHUNKS_FQN} SELECT * FROM {STAGING}")
+        # IMPORTANT: only replace rows for files that ACTUALLY produced chunks. If a
+        # new/changed file parses to 0 chunks (e.g. an unsupported .txt or a transient
+        # parse error), we must NOT delete its existing rows - doing so would lose data
+        # with nothing to replace it. So we delete only the staged source_paths.
+        staged_paths = [r[0] for r in spark.sql(f"SELECT DISTINCT source_path FROM {STAGING}").collect()]
+        if not staged_paths:
+            print("Incremental: new/changed files produced no parseable chunks; "
+                  "existing data left untouched.")
+        else:
+            in_list = ", ".join("'" + p.replace("'", "''") + "'" for p in staged_paths)
+            spark.sql(f"DELETE FROM {CHUNKS_FQN} WHERE source_path IN ({in_list})")   # replace only reparsed files
+            spark.sql(f"INSERT INTO {CHUNKS_FQN} SELECT * FROM {STAGING}")
+            print(f"Incremental: upserted {len(staged_paths)} file(s) "
+                  f"(of {len(new_paths)} new/changed).")
         spark.sql(f"DROP TABLE IF EXISTS {STAGING}")                                  # tidy up the staging table
-        print(f"Incremental: parsed {len(new_paths)} new/changed file(s) and upserted their chunks.")
 else:
     # Full rebuild: parse/chunk every file and replace the table (also used on the
     # first run and to add the content_hash column to an older table).
