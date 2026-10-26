@@ -147,16 +147,24 @@ if clear:
     st.session_state.messages = []
 
 
-# Matches inline citations like [Doc_Name:0:0003] that the model adds after claims.
-_CITE_RE = re.compile(r"\s*\[[^\[\]]*:\d+:\d+[^\[\]]*\]")
+# Matches inline chunk-id citations the model adds after claims, in either style:
+#   old custom chunks:  [Doc_Name:0:0003]  (name + :page:index)
+#   ai_prep_search:     [72c7...a43_1]     (hex hash + _index)
+_CITE_RE = re.compile(r"\s*\[(?:[^\[\]\s]*:\d+:\d+|[0-9a-fA-F]{6,}_\d+)\]")
 
 
 # Remove the raw [chunk_id] citations from the answer text for a clean display.
-# The Sources panel below already shows exactly which chunks were used.
-def _clean_answer(text: str) -> str:
-    text = _CITE_RE.sub("", text or "")      # drop the bracketed source ids
+# The chunk ids are an internal detail, confusing to the reader.
+def _clean_answer(text: str, chunk_ids=None) -> str:
+    text = text or ""
+    # 1) Remove the EXACT ids that were retrieved (most reliable, any id format).
+    for cid in (chunk_ids or []):
+        if cid:
+            text = text.replace(f"[{cid}]", "")
+    # 2) Remove any remaining citation-shaped brackets the model invented.
+    text = _CITE_RE.sub("", text)
     text = re.sub(r"\s+([.,;:)])", r"\1", text)  # tidy space left before punctuation
-    text = re.sub(r"[ \t]{2,}", " ", text)   # collapse double spaces
+    text = re.sub(r"[ \t]{2,}", " ", text)       # collapse double spaces
     return text.strip()
 
 
@@ -195,8 +203,10 @@ if submitted and question and question.strip():   # runs when the user clicks As
                 st.error(str(exc))
                 st.stop()
 
-        # Strip inline [chunk_id] citations; the Sources panel holds traceability.
-        answer_display = _clean_answer(result["answer"])
+        # Strip inline [chunk_id] citations (confusing to the reader). Pass the
+        # retrieved ids so the exact ones are removed regardless of id format.
+        _ids = [s.get("chunk_id") for s in result.get("sources", [])]
+        answer_display = _clean_answer(result["answer"], _ids)
         st.write(answer_display)               # show the clean answer text
         if result.get("abstained"):            # if it abstained, say so clearly
             st.info("No sufficiently relevant evidence was found, so the assistant abstained.")
