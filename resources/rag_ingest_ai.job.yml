@@ -1,12 +1,19 @@
 # Databricks-recommended ingestion pipeline (AI Functions).
 # Runs notebook 10: ai_parse_document + ai_prep_search -> managed-embeddings
-# Vector Search index. Edit this file to change the pipeline.
+# Vector Search index. EVERY notebook widget is supplied from this file: the
+# commonly-overridden ones are job `parameters` (editable at run time), the rest
+# are explicit `base_parameters` values. The notebook widget defaults are only a
+# fallback and are always overridden here.
 resources:
   jobs:
     rag_ingest_ai:
       name: "[${bundle.target}] RAG Ingest (AI Functions)"
       parameters:
-        # Incremental: "true" = only new/changed files; "false" = full rebuild.
+        - name: catalog
+          default: databricks_rag_dev
+        - name: schema
+          default: rag
+        # "true" = only new/changed files; "false" = full rebuild.
         - name: incremental
           default: "true"
         # Create/sync the managed Vector Search index as part of the run.
@@ -20,6 +27,13 @@ resources:
           notebook_task:
             notebook_path: ${workspace.file_path}/notebooks/10_ai_parse_prep_index
             base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              volume: "source_docs"
+              chunks_table: "document_chunks_ai"
+              endpoint_name: "rag_poc_vs"
+              index_table: "document_chunks_ai_index"
+              embedding_endpoint: "databricks-gte-large-en"
               incremental: "{{job.parameters.incremental}}"
               create_index: "{{job.parameters.create_index}}"
               recreate_index: "{{job.parameters.recreate_index}}"

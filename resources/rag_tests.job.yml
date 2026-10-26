@@ -1,14 +1,24 @@
 # Test pipeline: runs the pytest suite on serverless and logs per-test results
-# to the test_log Delta table. Edit this file to change the test pipeline.
+# to the test_log Delta table. Every notebook widget is supplied from this file.
 resources:
   jobs:
     rag_tests:
       name: "[${bundle.target}] RAG Tests"
+      parameters:
+        - name: catalog
+          default: databricks_rag_dev
+        - name: schema
+          default: rag
+        - name: test_log_table
+          default: test_log
       tasks:
         - task_key: run_tests
           notebook_task:
             notebook_path: ${workspace.file_path}/notebooks/run_tests
             base_parameters:
-              # Pass the synced files path so the notebook can import src/ and find tests/.
+              # The synced files path so the notebook can import src/ and find tests/.
               project_root: ${workspace.file_path}
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              test_log_table: "{{job.parameters.test_log_table}}"
           # No cluster config = serverless compute.

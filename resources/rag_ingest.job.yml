@@ -1,18 +1,24 @@
-# Ingestion pipeline: runs notebooks 02 -> 05 in order on serverless.
-# Edit this file to change the ingestion pipeline (tasks, order, parameters).
+# Custom ingestion pipeline: runs notebooks 02 -> 03 -> 04 -> 05 in order on
+# serverless. EVERY notebook widget is supplied from this file: the commonly
+# overridden ones are job `parameters` (editable at run time), the per-stage ones
+# are explicit `base_parameters` values. The notebook widget defaults are only a
+# fallback and are always overridden here.
 resources:
   jobs:
     rag_ingest:
       name: "[${bundle.target}] RAG Ingest Pipeline"
-      # One switch for the whole pipeline. Pass at run time with --params.
       parameters:
+        - name: catalog
+          default: databricks_rag_dev
+        - name: schema
+          default: rag
         # "true" = incremental (only new/changed docs); "false" = full rebuild.
         - name: incremental
           default: "true"
-        # Whether the index step creates/syncs the Vector Search index.
+        # Create/sync the Vector Search index (maps to 05 create_resources).
         - name: create_index
           default: "true"
-        # Rebuild the index from scratch (needed only if the embedding dim changed).
+        # Rebuild the index from scratch (only if the embedding dimension changes).
         - name: recreate_index
           default: "false"
 
@@ -22,8 +28,16 @@ resources:
           notebook_task:
             notebook_path: ${workspace.file_path}/notebooks/02_extract_and_clean
             base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              volume: "source_docs"
+              source_path: ""
+              supported_extensions: "pdf,txt,md,docx"
+              min_chars: "20"
+              cleaned_table: "documents_cleaned"
+              write_mode: "overwrite"
+              save_cleaned: "true"
               incremental: "{{job.parameters.incremental}}"
-          # No cluster config = serverless compute (required on Free Edition).
 
         # 2) Chunk the cleaned text -> document_chunks
         - task_key: chunk_documents
@@ -32,6 +46,15 @@ resources:
           notebook_task:
             notebook_path: ${workspace.file_path}/notebooks/03_chunk_documents
             base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              source_table: "documents_cleaned"
+              chunks_table: "document_chunks"
+              chunk_size: "1000"
+              chunk_overlap: "150"
+              min_chunk_chars: "60"
+              write_mode: "overwrite"
+              save_chunks: "true"
               incremental: "{{job.parameters.incremental}}"
 
         # 3) Embed the chunks via the Databricks endpoint -> document_embeddings
@@ -41,6 +64,15 @@ resources:
           notebook_task:
             notebook_path: ${workspace.file_path}/notebooks/04_generate_embeddings
             base_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              chunks_table: "document_chunks"
+              embeddings_table: "document_embeddings"
+              embedding_endpoint: "databricks-qwen3-embedding-0-6b"
+              batch_size: "16"
+              normalize: "true"
+              write_mode: "overwrite"
+              save_embeddings: "true"
               incremental: "{{job.parameters.incremental}}"
 
         # 4) Create or sync the Vector Search index
@@ -50,6 +82,16 @@ resources:
           notebook_task:
             notebook_path: ${workspace.file_path}/notebooks/05_create_ai_search_index
             base_parameters:
-              create_resources: "{{job.parameters.create_index}}"
-              recreate_index: "{{job.parameters.recreate_index}}"
+              catalog: "{{job.parameters.catalog}}"
+              schema: "{{job.parameters.schema}}"
+              source_table: "document_embeddings"
+              index_table: "document_chunks_index"
+              endpoint_name: "rag_poc_vs"
+              endpoint_type: "STANDARD"
+              primary_key: "chunk_id"
+              embedding_column: "embedding"
               embedding_dim: "1024"
+              pipeline_type: "TRIGGERED"
+              query_endpoint: "databricks-qwen3-embedding-0-6b"
+              recreate_index: "{{job.parameters.recreate_index}}"
+              create_resources: "{{job.parameters.create_index}}"
