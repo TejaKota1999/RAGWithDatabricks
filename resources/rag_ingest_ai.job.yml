@@ -6,6 +6,9 @@ resources:
     rag_ingest_ai:
       name: "[${bundle.target}] RAG Ingest (AI Functions)"
       parameters:
+        # Incremental: "true" = only new/changed files; "false" = full rebuild.
+        - name: incremental
+          default: "true"
         # Create/sync the managed Vector Search index as part of the run.
         - name: create_index
           default: "true"
@@ -17,6 +20,7 @@ resources:
           notebook_task:
             notebook_path: ${workspace.file_path}/notebooks/10_ai_parse_prep_index
             base_parameters:
+              incremental: "{{job.parameters.incremental}}"
               create_index: "{{job.parameters.create_index}}"
               recreate_index: "{{job.parameters.recreate_index}}"
           # No cluster config = serverless compute.
