@@ -272,7 +272,7 @@ rag-project/
 │   └── requirements.txt              # Databricks Apps dependencies
 ├── tests/
 ├── data/
-│   └── sample_docs/
+│   └── eval_questions.json           # small labelled evaluation set
 └── artifacts/                        # Generated local indexes; do not commit
 ```
 
