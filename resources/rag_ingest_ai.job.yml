@@ -1,9 +1,11 @@
 # Databricks-recommended ingestion pipeline (AI Functions).
 # Runs notebook 10: ai_parse_document + ai_prep_search -> managed-embeddings
-# Vector Search index. EVERY notebook widget is supplied from this file: the
-# commonly-overridden ones are job `parameters` (editable at run time), the rest
-# are explicit `base_parameters` values. The notebook widget defaults are only a
-# fallback and are always overridden here.
+# Vector Search index. ALL 10 notebook widgets are job-level `parameters` here, so
+# every one of them is visible AND editable from the job's "Job parameters" panel /
+# "Run now" dialog in the Databricks UI - not just a few of them. The notebook's
+# own widget defaults are only a fallback for an ad-hoc manual run of the notebook
+# itself (outside the job); whenever this runs as the `rag_ingest_ai` job, every
+# value below (and only these) is what actually gets used.
 resources:
   jobs:
     rag_ingest_ai:
@@ -13,6 +15,21 @@ resources:
           default: databricks_rag_dev
         - name: schema
           default: rag
+        # UC volume (under catalog.schema) holding the source documents.
+        - name: volume
+          default: "source_docs"
+        # Output Delta table for the ai_prep_search chunks.
+        - name: chunks_table
+          default: "document_chunks_ai"
+        # Vector Search endpoint that hosts the index.
+        - name: endpoint_name
+          default: "rag_poc_vs"
+        # The managed-embeddings Vector Search index name.
+        - name: index_table
+          default: "document_chunks_ai_index"
+        # Serving endpoint the MANAGED index uses to embed chunk_to_embed + queries.
+        - name: embedding_endpoint
+          default: "databricks-gte-large-en"
         # "true" = only new/changed files; "false" = full rebuild.
         - name: incremental
           default: "true"
@@ -26,14 +43,16 @@ resources:
         - task_key: ai_parse_prep_index
           notebook_task:
             notebook_path: ${workspace.file_path}/notebooks/ai_functions/10_ai_parse_prep_index
+            # Every base_parameter below is a straight pass-through of the job
+            # parameter of the same name - nothing is hardcoded in this task.
             base_parameters:
               catalog: "{{job.parameters.catalog}}"
               schema: "{{job.parameters.schema}}"
-              volume: "source_docs"
-              chunks_table: "document_chunks_ai"
-              endpoint_name: "rag_poc_vs"
-              index_table: "document_chunks_ai_index"
-              embedding_endpoint: "databricks-gte-large-en"
+              volume: "{{job.parameters.volume}}"
+              chunks_table: "{{job.parameters.chunks_table}}"
+              endpoint_name: "{{job.parameters.endpoint_name}}"
+              index_table: "{{job.parameters.index_table}}"
+              embedding_endpoint: "{{job.parameters.embedding_endpoint}}"
               incremental: "{{job.parameters.incremental}}"
               create_index: "{{job.parameters.create_index}}"
               recreate_index: "{{job.parameters.recreate_index}}"

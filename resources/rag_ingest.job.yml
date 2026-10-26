@@ -1,8 +1,11 @@
 # Custom ingestion pipeline: runs notebooks 02 -> 03 -> 04 -> 05 in order on
-# serverless. EVERY notebook widget is supplied from this file: the commonly
-# overridden ones are job `parameters` (editable at run time), the per-stage ones
-# are explicit `base_parameters` values. The notebook widget defaults are only a
-# fallback and are always overridden here.
+# serverless. ALL notebook widgets across all 4 tasks are job-level `parameters`
+# here, so every one of them is visible AND editable from the job's "Job
+# parameters" panel / "Run now" dialog in the Databricks UI - nothing is a fixed
+# literal buried inside a task's base_parameters. The notebooks' own widget
+# defaults are only a fallback for an ad-hoc manual run of a notebook by itself
+# (outside the job); whenever this runs as the `rag_ingest` job, every value below
+# (and only these) is what actually gets used.
 resources:
   jobs:
     rag_ingest:
@@ -22,21 +25,104 @@ resources:
         - name: recreate_index
           default: "false"
 
+        # --- 02_extract_and_clean ---
+        # UC volume (under catalog.schema) holding the source documents.
+        - name: volume
+          default: "source_docs"
+        # Optional sub-path filter inside the volume ("" = whole volume).
+        - name: source_path
+          default: ""
+        # File extensions 02 will parse; anything else is skipped.
+        - name: supported_extensions
+          default: "pdf,txt,md,docx"
+        # Drop any extracted document shorter than this many characters.
+        - name: min_chars
+          default: "20"
+        # Output Delta table for cleaned/extracted text (02's output).
+        - name: cleaned_table
+          default: "documents_cleaned"
+        # Persist the cleaned table to Delta ("true") vs. preview only ("false").
+        - name: save_cleaned
+          default: "true"
+
+        # --- 03_chunk_documents / 04_generate_embeddings (shared table name) ---
+        # Output Delta table for chunks (03's output, 04's input).
+        - name: chunks_table
+          default: "document_chunks"
+        # Target characters per chunk.
+        - name: chunk_size
+          default: "1000"
+        # Overlap (characters) between consecutive chunks.
+        - name: chunk_overlap
+          default: "150"
+        # Drop any chunk shorter than this many characters (avoids noise chunks).
+        - name: min_chunk_chars
+          default: "60"
+        # Persist the chunks table to Delta ("true") vs. preview only ("false").
+        - name: save_chunks
+          default: "true"
+
+        # --- 04_generate_embeddings ---
+        # Output Delta table for embeddings (04's output, 05's input).
+        - name: embeddings_table
+          default: "document_embeddings"
+        # Databricks embedding serving endpoint (self-managed path, 1024-dim).
+        - name: embedding_endpoint
+          default: "databricks-qwen3-embedding-0-6b"
+        # How many chunks to embed per API call to the serving endpoint.
+        - name: batch_size
+          default: "16"
+        # L2-normalize embedding vectors before storing them.
+        - name: normalize
+          default: "true"
+        # Persist the embeddings table to Delta ("true") vs. preview only ("false").
+        - name: save_embeddings
+          default: "true"
+
+        # --- Shared write mode (02/03/04 each overwrite their output table) ---
+        - name: write_mode
+          default: "overwrite"
+
+        # --- 05_create_ai_search_index ---
+        # The self-managed (vector-column) Vector Search index name.
+        - name: index_table
+          default: "document_chunks_index"
+        # Vector Search endpoint that hosts the index.
+        - name: endpoint_name
+          default: "rag_poc_vs"
+        # STANDARD (serverless-friendly) vs other Vector Search endpoint tiers.
+        - name: endpoint_type
+          default: "STANDARD"
+        # Unique-id column in the embeddings table (index primary key).
+        - name: primary_key
+          default: "chunk_id"
+        # Column in the embeddings table holding the 1024-dim vector.
+        - name: embedding_column
+          default: "embedding"
+        # Must match the embedding endpoint's output dimension.
+        - name: embedding_dim
+          default: "1024"
+        # TRIGGERED = sync on demand (vs CONTINUOUS, which stays always-on).
+        - name: pipeline_type
+          default: "TRIGGERED"
+
       tasks:
         # 1) Extract + clean text from the volume -> documents_cleaned
         - task_key: extract_and_clean
           notebook_task:
             notebook_path: ${workspace.file_path}/notebooks/custom/02_extract_and_clean
+            # Every base_parameter below is a straight pass-through of the job
+            # parameter of the same name - nothing is hardcoded in this task.
             base_parameters:
               catalog: "{{job.parameters.catalog}}"
               schema: "{{job.parameters.schema}}"
-              volume: "source_docs"
-              source_path: ""
-              supported_extensions: "pdf,txt,md,docx"
-              min_chars: "20"
-              cleaned_table: "documents_cleaned"
-              write_mode: "overwrite"
-              save_cleaned: "true"
+              volume: "{{job.parameters.volume}}"
+              source_path: "{{job.parameters.source_path}}"
+              supported_extensions: "{{job.parameters.supported_extensions}}"
+              min_chars: "{{job.parameters.min_chars}}"
+              cleaned_table: "{{job.parameters.cleaned_table}}"
+              write_mode: "{{job.parameters.write_mode}}"
+              save_cleaned: "{{job.parameters.save_cleaned}}"
               incremental: "{{job.parameters.incremental}}"
 
         # 2) Chunk the cleaned text -> document_chunks
@@ -48,13 +134,14 @@ resources:
             base_parameters:
               catalog: "{{job.parameters.catalog}}"
               schema: "{{job.parameters.schema}}"
-              source_table: "documents_cleaned"
-              chunks_table: "document_chunks"
-              chunk_size: "1000"
-              chunk_overlap: "150"
-              min_chunk_chars: "60"
-              write_mode: "overwrite"
-              save_chunks: "true"
+              # Reads 02's output table (named by the job's `cleaned_table` param).
+              source_table: "{{job.parameters.cleaned_table}}"
+              chunks_table: "{{job.parameters.chunks_table}}"
+              chunk_size: "{{job.parameters.chunk_size}}"
+              chunk_overlap: "{{job.parameters.chunk_overlap}}"
+              min_chunk_chars: "{{job.parameters.min_chunk_chars}}"
+              write_mode: "{{job.parameters.write_mode}}"
+              save_chunks: "{{job.parameters.save_chunks}}"
               incremental: "{{job.parameters.incremental}}"
 
         # 3) Embed the chunks via the Databricks endpoint -> document_embeddings
@@ -66,13 +153,14 @@ resources:
             base_parameters:
               catalog: "{{job.parameters.catalog}}"
               schema: "{{job.parameters.schema}}"
-              chunks_table: "document_chunks"
-              embeddings_table: "document_embeddings"
-              embedding_endpoint: "databricks-qwen3-embedding-0-6b"
-              batch_size: "16"
-              normalize: "true"
-              write_mode: "overwrite"
-              save_embeddings: "true"
+              # Reads 03's output table (same job parameter as above).
+              chunks_table: "{{job.parameters.chunks_table}}"
+              embeddings_table: "{{job.parameters.embeddings_table}}"
+              embedding_endpoint: "{{job.parameters.embedding_endpoint}}"
+              batch_size: "{{job.parameters.batch_size}}"
+              normalize: "{{job.parameters.normalize}}"
+              write_mode: "{{job.parameters.write_mode}}"
+              save_embeddings: "{{job.parameters.save_embeddings}}"
               incremental: "{{job.parameters.incremental}}"
 
         # 4) Create or sync the Vector Search index
@@ -84,14 +172,17 @@ resources:
             base_parameters:
               catalog: "{{job.parameters.catalog}}"
               schema: "{{job.parameters.schema}}"
-              source_table: "document_embeddings"
-              index_table: "document_chunks_index"
-              endpoint_name: "rag_poc_vs"
-              endpoint_type: "STANDARD"
-              primary_key: "chunk_id"
-              embedding_column: "embedding"
-              embedding_dim: "1024"
-              pipeline_type: "TRIGGERED"
-              query_endpoint: "databricks-qwen3-embedding-0-6b"
+              # Reads 04's output table (same job parameter as above).
+              source_table: "{{job.parameters.embeddings_table}}"
+              index_table: "{{job.parameters.index_table}}"
+              endpoint_name: "{{job.parameters.endpoint_name}}"
+              endpoint_type: "{{job.parameters.endpoint_type}}"
+              primary_key: "{{job.parameters.primary_key}}"
+              embedding_column: "{{job.parameters.embedding_column}}"
+              embedding_dim: "{{job.parameters.embedding_dim}}"
+              pipeline_type: "{{job.parameters.pipeline_type}}"
+              # The query-time embedding endpoint must match the one used to embed
+              # the chunks, so it reuses the same job parameter.
+              query_endpoint: "{{job.parameters.embedding_endpoint}}"
               recreate_index: "{{job.parameters.recreate_index}}"
               create_resources: "{{job.parameters.create_index}}"
