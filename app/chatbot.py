@@ -195,10 +195,19 @@ if submitted and question and question.strip():   # runs when the user clicks As
     st.session_state.messages.append({"role": "user", "content": question})
     st.chat_message("user").write(question)
 
+    # Conversational memory: pass the PRIOR turns (everything except the question we
+    # just appended) so a follow-up is understood in context. The chain reformulates
+    # the follow-up for retrieval and gives the conversation to the model. History
+    # lives only in st.session_state, so it is cleared on "Clear chat" / session end.
+    history = [
+        {"role": m["role"], "content": m["content"]}
+        for m in st.session_state.messages[:-1]
+    ]
+
     with st.chat_message("assistant"):         # start the assistant's reply bubble
         with st.spinner("Retrieving and generating ..."):   # loading indicator
             try:
-                result = chain.answer(question)             # the actual RAG call
+                result = chain.answer(question, history=history)   # the actual RAG call
             except LLMUnavailableError as exc:              # endpoint/quota problem?
                 st.error(str(exc))
                 st.stop()

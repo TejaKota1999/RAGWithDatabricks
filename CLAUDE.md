@@ -169,6 +169,21 @@ live workspace if anything looks stale.
 -   For CLI calls with Workspace paths from Git Bash, set `MSYS_NO_PATHCONV=1`
     to stop path mangling.
 
+### Conversational memory (follow-up questions)
+
+-   The chat UI keeps the transcript in Streamlit `st.session_state` (in-memory,
+    per session; cleared on "Clear chat", refresh, or session end - nothing is
+    persisted to storage).
+-   `RagChain.answer(question, history=...)` gives follow-ups context in two steps:
+    (1) a **condense** step rewrites a follow-up into a standalone question
+    (`CONDENSE_SYSTEM_PROMPT`) so Vector Search retrieves the right chunks, and
+    (2) the recent conversation is included in the generation prompt. Only the last
+    `_MAX_HISTORY_TURNS` (6) turns are used, to keep prompts/quota small.
+-   The condense step runs **only when there is history** (no extra model call on
+    the first question) and falls back to the raw question on any error. Answers
+    are still grounded in retrieved context, so the bot abstains when the follow-up
+    has no supporting evidence.
+
 ### Known limitation
 
 -   The 8B chat model does not always emit the exact abstain string and can

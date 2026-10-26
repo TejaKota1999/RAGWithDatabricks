@@ -130,3 +130,60 @@ def test_diagnostics_present():
     result = chain.answer("returns?")
     assert result["diagnostics"]["retrieved"] >= 1
     assert result["diagnostics"]["top_k"] == 3
+
+
+# A fake LLM that behaves differently for the two kinds of call the chain makes:
+#   - the CONDENSE call (system == CONDENSE_SYSTEM_PROMPT) -> return the rewrite
+#   - the ANSWER call -> return a canned answer, and record the prompt so we can
+#     check the conversation history was included.
+class ConversationLLM:
+    def __init__(self, rewrite="What is the iPhone replacement policy for screen damage?"):
+        self.rewrite = rewrite
+        self.condense_calls = 0
+        self.answer_prompt = None
+
+    def generate(self, prompt, system=None):
+        from src.serving.prompt_templates import CONDENSE_SYSTEM_PROMPT
+
+        if system == CONDENSE_SYSTEM_PROMPT:   # this is the reformulation step
+            self.condense_calls += 1
+            return self.rewrite
+        self.answer_prompt = prompt            # this is the answer step
+        return "Answer [returns:0:0000]."
+
+
+# CONVERSATIONAL MEMORY: a follow-up with history is rewritten into a standalone
+# question BEFORE retrieval, and the conversation is included in the answer prompt.
+def test_follow_up_is_reformulated_and_history_in_prompt():
+    # Example: after asking about iPhone replacement, the user asks a bare
+    #   follow-up "what about screen damage?". With history, the chain rewrites it
+    #   into a full standalone question and searches with THAT (so retrieval works),
+    #   and the prior turns appear in the answer prompt.
+    retr = FakeTextRetriever()
+    llm = ConversationLLM()
+    chain = RagChain(retr, embed_fn=None, llm=llm, top_k=3, min_score=0.1)
+    history = [
+        {"role": "user", "content": "What are the criteria for a replacement iPhone?"},
+        {"role": "assistant", "content": "A replacement is provided for manufacturing defects."},
+    ]
+    result = chain.answer("what about screen damage?", history=history)
+    # The follow-up was reformulated and the rewrite was used for retrieval.
+    assert llm.condense_calls == 1
+    assert retr.last_query == "What is the iPhone replacement policy for screen damage?"
+    assert result["diagnostics"]["search_query"] == retr.last_query
+    # The prior conversation is present in the prompt sent to the model.
+    assert "Conversation so far:" in llm.answer_prompt
+    assert "replacement iPhone" in llm.answer_prompt
+
+
+# No history (a fresh first question) must NOT trigger the extra condense call, and
+# retrieval uses the raw question text unchanged.
+def test_first_question_skips_reformulation():
+    # Example: the very first question has no history, so the chain does not spend
+    #   an extra model call reformulating it - it searches with the question as-is.
+    retr = FakeTextRetriever()
+    llm = ConversationLLM()
+    chain = RagChain(retr, embed_fn=None, llm=llm, top_k=3, min_score=0.1)
+    chain.answer("What is the returns policy?")
+    assert llm.condense_calls == 0
+    assert retr.last_query == "What is the returns policy?"

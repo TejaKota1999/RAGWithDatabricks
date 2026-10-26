@@ -14,7 +14,16 @@ from __future__ import annotations
 from typing import Callable, Protocol
 
 # Prompt text and the standard "I can't answer" message come from prompt_templates.
-from src.serving.prompt_templates import ABSTAIN_MESSAGE, SYSTEM_PROMPT, build_user_prompt
+from src.serving.prompt_templates import (
+    ABSTAIN_MESSAGE,
+    CONDENSE_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    build_condense_prompt,
+    build_user_prompt,
+)
+
+# How many recent turns of history to use (keeps prompts small and quota tiny).
+_MAX_HISTORY_TURNS = 6
 
 
 # Describes any retriever we accept: it must have a .search(...) method.
@@ -57,17 +66,47 @@ class RagChain:
     def _sources(hits: list[dict]) -> list[dict]:
         return [{k: h.get(k) for k in _SOURCE_FIELDS if k in h} for h in hits]
 
-    # The main method: take a question, return a structured answer dictionary.
-    def answer(self, question: str) -> dict:
-        """Return {answer, sources, abstained, diagnostics}."""
+    # Rewrite a follow-up into a standalone question using the recent history, so
+    # retrieval finds the right chunks. Only runs when there IS history (the first
+    # question has none), so it adds no extra model call to a fresh conversation.
+    # On any failure it safely falls back to the original question.
+    def _condense(self, question: str, history: list[dict]) -> str:
+        recent = history[-_MAX_HISTORY_TURNS:]
+        try:
+            rewritten = self.llm.generate(
+                build_condense_prompt(recent, question),
+                system=CONDENSE_SYSTEM_PROMPT,
+            )
+        except Exception:
+            return question
+        rewritten = (rewritten or "").strip()
+        return rewritten or question
+
+    # The main method: take a question (+ optional prior turns) and return a
+    # structured answer dictionary.
+    def answer(self, question: str, history: list[dict] | None = None) -> dict:
+        """Return {answer, sources, abstained, diagnostics}.
+
+        `history` is the prior conversation as [{role, content}, ...] (most recent
+        last), excluding the current question. When present, the follow-up is
+        reformulated into a standalone search query and the conversation is given
+        to the model so it can answer "based on the context response".
+        """
         # Reject empty/blank questions up front.
         if not question or not question.strip():
             raise ValueError("question must not be empty")
 
+        # Keep only the most recent turns (token/quota safety).
+        history = (history or [])[-_MAX_HISTORY_TURNS:]
+
+        # 0) If this is a follow-up, rewrite it into a standalone question so
+        #    retrieval (which has no memory) searches for the right thing.
+        search_question = self._condense(question, history) if history else question
+
         # 1) Build the query the retriever expects: a VECTOR when we have an
         #    embed_fn (self-managed index), or the raw QUESTION TEXT when there is
         #    no embed_fn (managed-embeddings index embeds the text itself).
-        query = self.embed_fn(question) if self.embed_fn else question
+        query = self.embed_fn(search_question) if self.embed_fn else search_question
         # 2) Retrieve the most relevant chunks above the score threshold.
         hits = self.retriever.search(query, top_k=self.top_k, min_score=self.min_score)
 
@@ -77,6 +116,9 @@ class RagChain:
             "top_k": self.top_k,
             "min_score": self.min_score,
             "top_score": hits[0].get("score") if hits else None,
+            # The actual query used for retrieval (differs from `question` only when
+            # a follow-up was reformulated); handy for debugging conversational memory.
+            "search_query": search_question,
         }
 
         # 3) No relevant evidence -> abstain instead of guessing.
@@ -88,8 +130,10 @@ class RagChain:
                 "diagnostics": diagnostics,
             }
 
-        # 4) Build the prompt (question + retrieved context) and call the LLM.
-        prompt = build_user_prompt(question, hits)
+        # 4) Build the prompt (recent conversation + question + retrieved context)
+        #    and call the LLM. Passing the history lets the model answer a follow-up
+        #    in light of what was said before, while still grounding on the context.
+        prompt = build_user_prompt(question, hits, history=history)
         try:
             text = self.llm.generate(prompt, system=SYSTEM_PROMPT)
         except Exception as exc:  # never leak stack traces to the user
