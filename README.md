@@ -62,10 +62,12 @@ verified working on this Free Edition workspace).
 
 | Path | Purpose |
 |------|---------|
-| `notebooks/02_extract_and_clean.py` | Extract + clean text from the UC volume (txt/md/pdf/docx) |
-| `notebooks/03_chunk_documents.py` | Paragraph-aware chunking with stable ids + metadata |
-| `notebooks/04_generate_embeddings.py` | Embeddings via the **Databricks endpoint** (1024-dim) into Delta + CDF |
-| `notebooks/05_create_ai_search_index.py` | Create/rebuild the **Vector Search** index (gated) |
+| `notebooks/ai_functions/10_ai_parse_prep_index.py` | **Recommended** pipeline: `ai_parse_document` + `ai_prep_search` + managed Vector Search index (incremental) |
+| `notebooks/custom/02_extract_and_clean.py` | (custom) Extract + clean text from the UC volume (txt/md/pdf/docx) |
+| `notebooks/custom/03_chunk_documents.py` | (custom) Paragraph-aware chunking with stable ids + metadata |
+| `notebooks/custom/04_generate_embeddings.py` | (custom) Embeddings via the **Databricks endpoint** (1024-dim) into Delta + CDF |
+| `notebooks/custom/05_create_ai_search_index.py` | (custom) Create/rebuild the **Vector Search** index (gated) |
+| `notebooks/run_tests.py` | Run the pytest suite on serverless; logs per-test rows to `test_log` |
 | `src/databricks_client.py` | Shared Databricks `WorkspaceClient` (auth helper) |
 | `src/embedder.py` | **DatabricksEmbedder** (default) + LocalEmbedder (fallback) |
 | `src/retriever.py` | **VectorSearchRetriever** (default) + FaissRetriever (fallback) |

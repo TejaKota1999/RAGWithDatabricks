@@ -26,7 +26,7 @@ resources:
         # 1) Extract + clean text from the volume -> documents_cleaned
         - task_key: extract_and_clean
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/02_extract_and_clean
+            notebook_path: ${workspace.file_path}/notebooks/custom/02_extract_and_clean
             base_parameters:
               catalog: "{{job.parameters.catalog}}"
               schema: "{{job.parameters.schema}}"
@@ -44,7 +44,7 @@ resources:
           depends_on:
             - task_key: extract_and_clean
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/03_chunk_documents
+            notebook_path: ${workspace.file_path}/notebooks/custom/03_chunk_documents
             base_parameters:
               catalog: "{{job.parameters.catalog}}"
               schema: "{{job.parameters.schema}}"
@@ -62,7 +62,7 @@ resources:
           depends_on:
             - task_key: chunk_documents
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/04_generate_embeddings
+            notebook_path: ${workspace.file_path}/notebooks/custom/04_generate_embeddings
             base_parameters:
               catalog: "{{job.parameters.catalog}}"
               schema: "{{job.parameters.schema}}"
@@ -80,7 +80,7 @@ resources:
           depends_on:
             - task_key: generate_embeddings
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/05_create_ai_search_index
+            notebook_path: ${workspace.file_path}/notebooks/custom/05_create_ai_search_index
             base_parameters:
               catalog: "{{job.parameters.catalog}}"
               schema: "{{job.parameters.schema}}"

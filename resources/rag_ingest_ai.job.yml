@@ -25,7 +25,7 @@ resources:
       tasks:
         - task_key: ai_parse_prep_index
           notebook_task:
-            notebook_path: ${workspace.file_path}/notebooks/10_ai_parse_prep_index
+            notebook_path: ${workspace.file_path}/notebooks/ai_functions/10_ai_parse_prep_index
             base_parameters:
               catalog: "{{job.parameters.catalog}}"
               schema: "{{job.parameters.schema}}"
