@@ -98,21 +98,18 @@ st.title("Company Knowledge Assistant")
 st.caption("RAG on Databricks Free Edition. Answers are grounded in retrieved documents.")
 
 # COMMAND ----------
-# The left sidebar holds the settings the user can change.
-with st.sidebar:
-    st.header("Settings")
-    # Which Vector Search index to query (managed-embeddings index).
-    index_name = st.text_input("Vector Search index", value=DEFAULT_INDEX)
-    # Which chat endpoint to use (the index embeds queries itself, so no embed endpoint).
-    chat_endpoint = st.text_input("Chat endpoint", value=CHAT_ENDPOINT)
-    # How many chunks to retrieve per question (slider from 1 to 10, default 5).
-    top_k = st.slider("Top-k chunks", 1, 10, 5)
-    # Minimum similarity to treat a chunk as relevant (0.0 to 1.0, default 0.3).
-    min_score = st.slider("Min relevance score", 0.0, 1.0, 0.3, 0.05)
-    # Button to wipe the conversation transcript and start fresh.
+# Fixed configuration (the Settings sidebar was removed for a clean UI). These come
+# from environment variables / sensible defaults instead of on-screen controls.
+index_name = DEFAULT_INDEX          # managed-embeddings Vector Search index
+chat_endpoint = CHAT_ENDPOINT       # Databricks chat serving endpoint
+top_k = 5                           # how many chunks to retrieve per question
+min_score = 0.3                     # minimum similarity to treat a chunk as relevant
+
+# A small "Clear chat" button in the main area (no settings panel). It still drives
+# the session-clear behavior: it wipes the in-memory transcript for this session.
+_sp, _clearcol = st.columns([5, 1])
+with _clearcol:
     clear = st.button("Clear chat")
-    if PROFILE:
-        st.caption(f"Local run using profile: `{PROFILE}`")
 
 
 # COMMAND ----------
