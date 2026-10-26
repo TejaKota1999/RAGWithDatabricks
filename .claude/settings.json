@@ -2,5 +2,10 @@
   "enabledPlugins": {
     "databricks@claude-plugins-official": true,
     "databricks@databricks-agent-skills": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(MSYS_NO_PATHCONV=1 databricks apps deploy rag-chatbot --source-code-path \"/Workspace/Users/sairam1610345@gmail.com/.bundle/rag-poc/dev/files\" --profile sairam)"
+    ]
   }
 }
