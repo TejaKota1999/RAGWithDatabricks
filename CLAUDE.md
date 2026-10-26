@@ -95,13 +95,25 @@ live workspace if anything looks stale.
 -   CLI profile: `sairam` (always pass `--profile sairam`).
 -   Catalog / schema: `databricks_rag_dev.rag`.
 -   Volume (source docs): `/Volumes/databricks_rag_dev/rag/source_docs`.
--   Tables: `documents_cleaned`, `document_chunks`, `document_embeddings`,
+-   Tables: `documents_cleaned`, `document_chunks`, `document_embeddings`
+    (custom path); `document_chunks_ai` (ai_prep_search chunks, **app default**);
     `test_log` (test audit, one row per test).
--   Vector Search endpoint: `rag_poc_vs`; index
-    `databricks_rag_dev.rag.document_chunks_index` (Delta Sync, self-managed,
-    **1024-dim**).
--   Serving endpoints: embeddings `databricks-qwen3-embedding-0-6b`
-    (1024-dim), chat `databricks-meta-llama-3-1-8b-instruct`.
+-   Vector Search endpoint: `rag_poc_vs`. Two indexes:
+    -   `document_chunks_ai_index` - **app default**, MANAGED embeddings (Vector
+        Search embeds `chunk_to_embed` via `databricks-gte-large-en`); query by
+        **text**. Built by the recommended AI-Functions pipeline (notebook 10).
+    -   `document_chunks_index` - alternative, self-managed 1024-dim embeddings
+        (`databricks-qwen3-embedding-0-6b`); query by vector. Built by 02-05.
+-   Serving endpoints: embeddings `databricks-gte-large-en` (managed index) and
+    `databricks-qwen3-embedding-0-6b` (self-managed path); chat
+    `databricks-meta-llama-3-1-8b-instruct`.
+-   **Recommended pipeline (default):** `ai_parse_document` + `ai_prep_search`
+    (notebook 10 / job `rag_ingest_ai`) produce `document_chunks_ai`, indexed with
+    managed embeddings. The app (`VectorSearchTextRetriever`, `embed_fn=None`)
+    queries it by text; generation stays on the chat endpoint (`ai_query` is the
+    SQL-side equivalent, verified available). All three AI Functions
+    (`ai_parse_document`, `ai_prep_search`, `ai_query`) are confirmed working on
+    this Free Edition workspace.
 -   Databricks App: `rag-chatbot` (Streamlit).
 
 ### Pipelines (Lakeflow Jobs in `databricks.yml`)
@@ -112,6 +124,10 @@ live workspace if anything looks stale.
     `recreate_index` for the index step.
     -   `databricks bundle run rag_ingest -t dev --profile sairam` (incremental)
     -   `... --params incremental=false` (full rebuild)
+-   **`rag_ingest_ai`** - the **recommended** pipeline: notebook 10 runs
+    `ai_parse_document` + `ai_prep_search` -> `document_chunks_ai` and
+    creates/syncs the managed-embeddings index `document_chunks_ai_index`.
+    -   `databricks bundle run rag_ingest_ai -t dev --profile sairam`
 -   **`rag_tests`** - runs the pytest suite on serverless
     (`notebooks/run_tests.py`) and writes one row **per test** to `test_log`
     (pass or fail), then fails the task if any test failed.

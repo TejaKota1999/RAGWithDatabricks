@@ -98,6 +98,30 @@ def test_llm_failure_is_handled_gracefully():
     assert "unavailable" in result["answer"].lower()
 
 
+# A fake "text" retriever: it is searched by the QUESTION TEXT (managed-embeddings
+# index), remembers what it received, and returns one known chunk.
+class FakeTextRetriever:
+    def __init__(self):
+        self.last_query = None
+
+    def search(self, query, top_k=5, min_score=None):
+        self.last_query = query     # record what the chain passed in
+        return [{"chunk_id": "returns:0:0000", "chunk_text": "Returns within 30 days.",
+                 "source_path": "returns.md", "section": "Returns", "document_id": "returns"}]
+
+
+# With embed_fn=None, the chain must pass the QUESTION TEXT (not a vector) to search.
+def test_text_retriever_path_passes_question_text():
+    # Example: a managed-embeddings index embeds the query itself, so RagChain is
+    #   built with embed_fn=None and hands the raw question to the retriever.
+    retr = FakeTextRetriever()
+    chain = RagChain(retr, embed_fn=None, llm=FakeLLM(), top_k=3, min_score=0.1)
+    result = chain.answer("What is the returns policy?")
+    assert retr.last_query == "What is the returns policy?"   # text passed, not a vector
+    assert result["abstained"] is False
+    assert result["sources"][0]["chunk_id"] == "returns:0:0000"
+
+
 # The result should include diagnostics (how many retrieved, the top_k used, etc.).
 def test_diagnostics_present():
     # Example: asking "returns?" with top_k=3 -> result["diagnostics"] reports

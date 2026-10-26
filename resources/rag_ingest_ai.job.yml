@@ -1,0 +1,22 @@
+# Databricks-recommended ingestion pipeline (AI Functions).
+# Runs notebook 10: ai_parse_document + ai_prep_search -> managed-embeddings
+# Vector Search index. Edit this file to change the pipeline.
+resources:
+  jobs:
+    rag_ingest_ai:
+      name: "[${bundle.target}] RAG Ingest (AI Functions)"
+      parameters:
+        # Create/sync the managed Vector Search index as part of the run.
+        - name: create_index
+          default: "true"
+        # Rebuild the index from scratch (only if the embedding endpoint changes).
+        - name: recreate_index
+          default: "false"
+      tasks:
+        - task_key: ai_parse_prep_index
+          notebook_task:
+            notebook_path: ${workspace.file_path}/notebooks/10_ai_parse_prep_index
+            base_parameters:
+              create_index: "{{job.parameters.create_index}}"
+              recreate_index: "{{job.parameters.recreate_index}}"
+          # No cluster config = serverless compute.

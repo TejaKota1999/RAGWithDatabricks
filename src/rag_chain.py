@@ -38,11 +38,14 @@ class RagChain:
     def __init__(
         self,
         retriever: _Retriever,
-        embed_fn: Callable[[str], list[float]],
+        embed_fn: Callable[[str], list[float]] | None,
         llm: _LLM,
         top_k: int = 5,                       # how many chunks to retrieve
         min_score: float | None = 0.3,        # minimum similarity to count as relevant
     ):
+        # embed_fn is OPTIONAL: pass a function for self-managed indexes (we embed
+        # the question ourselves), or None for a managed-embeddings index that
+        # embeds the question itself (we then pass the question text to search).
         self.retriever = retriever
         self.embed_fn = embed_fn
         self.llm = llm
@@ -61,10 +64,12 @@ class RagChain:
         if not question or not question.strip():
             raise ValueError("question must not be empty")
 
-        # 1) Turn the question into a vector using the same model as the documents.
-        query_vector = self.embed_fn(question)
-        # 2) Retrieve the most similar chunks above the score threshold.
-        hits = self.retriever.search(query_vector, top_k=self.top_k, min_score=self.min_score)
+        # 1) Build the query the retriever expects: a VECTOR when we have an
+        #    embed_fn (self-managed index), or the raw QUESTION TEXT when there is
+        #    no embed_fn (managed-embeddings index embeds the text itself).
+        query = self.embed_fn(question) if self.embed_fn else question
+        # 2) Retrieve the most relevant chunks above the score threshold.
+        hits = self.retriever.search(query, top_k=self.top_k, min_score=self.min_score)
 
         # Diagnostics are extra info for debugging (how many hits, best score, etc.).
         diagnostics = {

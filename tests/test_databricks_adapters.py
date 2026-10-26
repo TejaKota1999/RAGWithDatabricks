@@ -12,10 +12,10 @@ from types import SimpleNamespace
 
 import pytest
 
-# The three Databricks adapters under test.
+# The Databricks adapters under test.
 from src.embedder import DatabricksEmbedder
 from src.llm import DatabricksChatClient, LLMUnavailableError
-from src.retriever import VectorSearchRetriever
+from src.retriever import VectorSearchRetriever, VectorSearchTextRetriever
 
 
 # ---------------------------------------------------------------------------
@@ -142,3 +142,46 @@ def test_vs_search_rejects_bad_top_k():
     r._client = _fake_vs_client()
     with pytest.raises(ValueError):
         r.search([0.1], top_k=0)
+
+
+# ---------------------------------------------------------------------------
+# Managed-embeddings text retriever - queries the index by TEXT (ai_prep_search).
+# ---------------------------------------------------------------------------
+# A fake managed index: it is queried by query_text and returns chunk_to_retrieve.
+class _FakeVSTextIndexes:
+    def query_index(self, index_name, columns, query_text, num_results):
+        manifest = SimpleNamespace(columns=[SimpleNamespace(name=c) for c in columns])
+        rows = [
+            ["c1", "clean text one", "path1", 0.88],   # strong (0.88)
+            ["c2", "clean text two", "path2", 0.15],   # weak (0.15)
+        ]
+        result = SimpleNamespace(data_array=rows)
+        return SimpleNamespace(manifest=manifest, result=result)
+
+
+def _fake_vs_text_client():
+    return SimpleNamespace(vector_search_indexes=_FakeVSTextIndexes())
+
+
+# search(query_text) should map chunk_to_retrieve -> chunk_text and attach scores.
+def test_vs_text_search_maps_retrieve_to_chunk_text():
+    # Example: a managed index returns chunk_to_retrieve "clean text one"; the
+    #   retriever exposes it as chunk_text so the rest of the pipeline is unchanged.
+    r = VectorSearchTextRetriever(index_name="cat.sch.ai_idx")
+    r._client = _fake_vs_text_client()
+    hits = r.search("how do I get a replacement?", top_k=5)
+    assert len(hits) == 2
+    assert hits[0]["chunk_id"] == "c1"
+    assert hits[0]["chunk_text"] == "clean text one"   # chunk_to_retrieve renamed
+    assert "chunk_to_retrieve" not in hits[0]
+    assert abs(hits[0]["score"] - 0.88) < 1e-6
+
+
+# min_score drops the weak row, and an empty query is rejected.
+def test_vs_text_search_min_score_and_empty_query():
+    r = VectorSearchTextRetriever(index_name="cat.sch.ai_idx")
+    r._client = _fake_vs_text_client()
+    hits = r.search("question", top_k=5, min_score=0.3)
+    assert [h["chunk_id"] for h in hits] == ["c1"]     # the 0.15 row is dropped
+    with pytest.raises(ValueError):
+        r.search("   ", top_k=5)                        # blank query -> error

@@ -36,17 +36,16 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import streamlit as st
 
 # Our building blocks (all Databricks-backed by default).
-from src.embedder import DEFAULT_ENDPOINT as DEFAULT_EMBED_ENDPOINT
-from src.embedder import DatabricksEmbedder
 from src.llm import DEFAULT_ENDPOINT as DEFAULT_CHAT_ENDPOINT
 from src.llm import DatabricksChatClient, LLMUnavailableError
 from src.rag_chain import RagChain
-from src.retriever import VectorSearchRetriever
+from src.retriever import VectorSearchTextRetriever
 
 # COMMAND ----------
 # Read configuration from environment variables, with defaults for this project.
-DEFAULT_INDEX = os.environ.get("RAG_INDEX_NAME", "databricks_rag_dev.rag.document_chunks_index")
-EMBED_ENDPOINT = os.environ.get("RAG_EMBED_ENDPOINT", DEFAULT_EMBED_ENDPOINT)
+# Default is the managed-embeddings index built by ai_parse_document + ai_prep_search;
+# it embeds the query itself, so the app queries by TEXT (no embedding endpoint here).
+DEFAULT_INDEX = os.environ.get("RAG_INDEX_NAME", "databricks_rag_dev.rag.document_chunks_ai_index")
 CHAT_ENDPOINT = os.environ.get("RAG_CHAT_ENDPOINT", DEFAULT_CHAT_ENDPOINT)
 # Inside a Databricks App this is unset (the App's identity is used automatically);
 # for LOCAL runs, set DATABRICKS_CONFIG_PROFILE (e.g. "sairam").
@@ -102,10 +101,9 @@ st.caption("RAG on Databricks Free Edition. Answers are grounded in retrieved do
 # The left sidebar holds the settings the user can change.
 with st.sidebar:
     st.header("Settings")
-    # Which Vector Search index to query.
+    # Which Vector Search index to query (managed-embeddings index).
     index_name = st.text_input("Vector Search index", value=DEFAULT_INDEX)
-    # Which serving endpoints to use.
-    embed_endpoint = st.text_input("Embedding endpoint", value=EMBED_ENDPOINT)
+    # Which chat endpoint to use (the index embeds queries itself, so no embed endpoint).
     chat_endpoint = st.text_input("Chat endpoint", value=CHAT_ENDPOINT)
     # How many chunks to retrieve per question (slider from 1 to 10, default 5).
     top_k = st.slider("Top-k chunks", 1, 10, 5)
@@ -120,21 +118,20 @@ with st.sidebar:
 # COMMAND ----------
 # Build the Databricks-backed chain once and cache it (re-created if settings change).
 @st.cache_resource(show_spinner="Connecting to Databricks ...")
-def _build_chain(index: str, embed_ep: str, chat_ep: str, k: int, score: float):
-    # The query embedder (Databricks endpoint) - same model that built the index.
-    embedder = DatabricksEmbedder(endpoint=embed_ep, profile=PROFILE)
-    # The retriever queries the managed Vector Search index.
-    retriever = VectorSearchRetriever(index_name=index, profile=PROFILE)
+def _build_chain(index: str, chat_ep: str, k: int, score: float):
+    # Managed-embeddings index: Vector Search embeds the query itself, so there is
+    # no separate embedder - we query by text.
+    retriever = VectorSearchTextRetriever(index_name=index, profile=PROFILE)
     # The generator (Databricks chat endpoint).
     llm = DatabricksChatClient(endpoint=chat_ep, profile=PROFILE)
-    # Wire them together into the RAG chain (orchestration is backend-agnostic).
-    return RagChain(retriever=retriever, embed_fn=embedder.encode_one, llm=llm, top_k=k, min_score=score)
+    # embed_fn=None -> RagChain passes the question TEXT to the retriever.
+    return RagChain(retriever=retriever, embed_fn=None, llm=llm, top_k=k, min_score=score)
 
 
 # COMMAND ----------
 # Build/load the chain; show a clear error and stop if it fails.
 try:
-    chain = _build_chain(index_name, embed_endpoint, chat_endpoint, top_k, min_score)
+    chain = _build_chain(index_name, chat_endpoint, top_k, min_score)
 except Exception as exc:
     st.error(f"Could not connect to Databricks: {exc}")
     st.stop()

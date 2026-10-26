@@ -21,10 +21,9 @@ env:
   # or remove it to show the logged-in Databricks user instead.
   - name: RAG_USER_NAME
     value: "Teja Kota"
-  # Which Vector Search index and serving endpoints the app should use.
+  # Managed-embeddings Vector Search index (ai_parse_document + ai_prep_search).
+  # It embeds queries itself, so no embedding endpoint is needed here.
   - name: RAG_INDEX_NAME
-    value: "databricks_rag_dev.rag.document_chunks_index"
-  - name: RAG_EMBED_ENDPOINT
-    value: "databricks-qwen3-embedding-0-6b"
+    value: "databricks_rag_dev.rag.document_chunks_ai_index"
   - name: RAG_CHAT_ENDPOINT
     value: "databricks-meta-llama-3-1-8b-instruct"

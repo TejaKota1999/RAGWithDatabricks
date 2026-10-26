@@ -19,6 +19,18 @@ There is **no dependency on local models** (no Ollama, no local
 sentence-transformers, no local FAISS) in the default path. A fully local path is
 retained only as an **optional offline fallback** (see the end of this file).
 
+### Two ingestion pipelines
+
+| Pipeline | How it works | Index (app default) |
+|---|---|---|
+| **AI Functions (recommended, default)** | `ai_parse_document` + `ai_prep_search` (notebook 10 / job `rag_ingest_ai`) produce context-enriched chunks; **Vector Search managed embeddings** (via `databricks-gte-large-en`) embeds them and the query | `document_chunks_ai_index` — queried by **text** |
+| **Custom (alternative)** | notebooks 02→05: Python parse/clean/chunk, embed via `databricks-qwen3-embedding-0-6b`, self-managed 1024-dim index | `document_chunks_index` — queried by vector |
+
+The chat app (`app/chatbot.py`) uses the **AI-Functions index** by default
+(`VectorSearchTextRetriever`, query by text). Generation uses the chat endpoint
+via the SDK (`ai_query` is the SQL-side equivalent; all three AI Functions are
+verified working on this Free Edition workspace).
+
 > Cost note: Foundation Model endpoints and Vector Search are **included** in Free
 > Edition but **metered against the serverless quota** — not unlimited. This POC
 > keeps usage tiny. Exceeding the quota can throttle compute for the day/month.
