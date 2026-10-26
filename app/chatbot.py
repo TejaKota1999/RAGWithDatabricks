@@ -170,9 +170,19 @@ for m in st.session_state.messages:
                 st.info("No sufficiently relevant evidence was found, so the assistant abstained.")
 
 # COMMAND ----------
-# The chat input box at the bottom of the page.
-question = st.chat_input("Ask a question about your documents")
-if question:                                   # runs when the user submits a question
+# A multi-line, paste-friendly input box with an "Ask" button. Using a form means
+# pressing Enter inside the box adds a new line (so long/multi-line pasted text is
+# fine), and the button submits. The box clears after each question.
+with st.form("ask_form", clear_on_submit=True):
+    question = st.text_area(
+        "Ask a question about your documents",
+        placeholder="Type or paste your question here ... (Shift+Enter for a new line)",
+        height=120,
+    )
+    submitted = st.form_submit_button("Ask")
+
+if submitted and question and question.strip():   # runs when the user clicks Ask
+    question = question.strip()
     # Save + show the user's message.
     st.session_state.messages.append({"role": "user", "content": question})
     st.chat_message("user").write(question)
