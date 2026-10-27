@@ -27,3 +27,8 @@ env:
     value: "databricks_rag_dev.rag.document_chunks_ai_index"
   - name: RAG_CHAT_ENDPOINT
     value: "databricks-meta-llama-3-1-8b-instruct"
+  # "How it works" tab: where to read live pipeline status from.
+  - name: RAG_VOLUME_PATH
+    value: "/Volumes/databricks_rag_dev/rag/source_docs"
+  - name: RAG_INGEST_JOB_NAME
+    value: "RAG Ingest (AI Functions)"

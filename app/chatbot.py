@@ -41,6 +41,9 @@ from src.serving.llm import DatabricksChatClient, LLMUnavailableError
 from src.serving.rag_chain import RagChain
 from src.serving.retriever import VectorSearchTextRetriever
 
+# The "How it works" live flow diagram (app/flow_view.py, next to this file).
+import flow_view
+
 # COMMAND ----------
 # Read configuration from environment variables, with defaults for this project.
 # Default is the managed-embeddings index built by ai_parse_document + ai_prep_search;
@@ -142,6 +145,7 @@ if "messages" not in st.session_state:
 # The "Clear chat" button empties the transcript.
 if clear:
     st.session_state.messages = []
+    st.session_state.pop("last_trace", None)
 
 
 # Matches inline chunk-id citations the model adds after claims, in either style:
@@ -166,63 +170,80 @@ def _clean_answer(text: str, chunk_ids=None) -> str:
 
 
 # COMMAND ----------
-# Re-draw the full transcript so far (every past question and answer stays visible).
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.write(m["content"])
-        if m["role"] == "assistant":
-            if m.get("abstained"):
-                st.info("No sufficiently relevant evidence was found, so the assistant abstained.")
+# Two tabs: the chat itself, and a live "How it works" flow diagram that traces
+# the ingestion pipeline and the last question asked (see app/flow_view.py).
+chat_tab, flow_tab = st.tabs(["Chat", "How it works"])
 
-# COMMAND ----------
-# A multi-line, paste-friendly input box with an "Ask" button. Using a form means
-# pressing Enter inside the box adds a new line (so long/multi-line pasted text is
-# fine), and the button submits. The box clears after each question.
-with st.form("ask_form", clear_on_submit=True):
-    question = st.text_area(
-        "Ask a question about your documents",
-        placeholder="Type or paste your question here ... (Shift+Enter for a new line)",
-        height=120,
-    )
-    submitted = st.form_submit_button("Ask")
+with chat_tab:
+    # Re-draw the full transcript so far (every past question and answer stays visible).
+    for m in st.session_state.messages:
+        with st.chat_message(m["role"]):
+            st.write(m["content"])
+            if m["role"] == "assistant":
+                if m.get("abstained"):
+                    st.info("No sufficiently relevant evidence was found, so the assistant abstained.")
 
-if submitted and question and question.strip():   # runs when the user clicks Ask
-    question = question.strip()
-    # Save + show the user's message.
-    st.session_state.messages.append({"role": "user", "content": question})
-    st.chat_message("user").write(question)
+    # A multi-line, paste-friendly input box with an "Ask" button. Using a form means
+    # pressing Enter inside the box adds a new line (so long/multi-line pasted text is
+    # fine), and the button submits. The box clears after each question.
+    with st.form("ask_form", clear_on_submit=True):
+        question = st.text_area(
+            "Ask a question about your documents",
+            placeholder="Type or paste your question here ... (Shift+Enter for a new line)",
+            height=120,
+        )
+        submitted = st.form_submit_button("Ask")
 
-    # Conversational memory: pass the PRIOR turns (everything except the question we
-    # just appended) so a follow-up is understood in context. The chain reformulates
-    # the follow-up for retrieval and gives the conversation to the model. History
-    # lives only in st.session_state, so it is cleared on "Clear chat" / session end.
-    history = [
-        {"role": m["role"], "content": m["content"]}
-        for m in st.session_state.messages[:-1]
-    ]
+    if submitted and question and question.strip():   # runs when the user clicks Ask
+        question = question.strip()
+        # Save + show the user's message.
+        st.session_state.messages.append({"role": "user", "content": question})
+        st.chat_message("user").write(question)
 
-    with st.chat_message("assistant"):         # start the assistant's reply bubble
-        with st.spinner("Retrieving and generating ..."):   # loading indicator
-            try:
-                result = chain.answer(question, history=history)   # the actual RAG call
-            except LLMUnavailableError as exc:              # endpoint/quota problem?
-                st.error(str(exc))
-                st.stop()
+        # Conversational memory: pass the PRIOR turns (everything except the question we
+        # just appended) so a follow-up is understood in context. The chain reformulates
+        # the follow-up for retrieval and gives the conversation to the model. History
+        # lives only in st.session_state, so it is cleared on "Clear chat" / session end.
+        history = [
+            {"role": m["role"], "content": m["content"]}
+            for m in st.session_state.messages[:-1]
+        ]
 
-        # Strip inline [chunk_id] citations (confusing to the reader). Pass the
-        # retrieved ids so the exact ones are removed regardless of id format.
-        _ids = [s.get("chunk_id") for s in result.get("sources", [])]
-        answer_display = _clean_answer(result["answer"], _ids)
-        st.write(answer_display)               # show the clean answer text
-        if result.get("abstained"):            # if it abstained, say so clearly
-            st.info("No sufficiently relevant evidence was found, so the assistant abstained.")
+        result = None
+        with st.chat_message("assistant"):         # start the assistant's reply bubble
+            with st.spinner("Retrieving and generating ..."):   # loading indicator
+                try:
+                    result = chain.answer(question, history=history)   # the actual RAG call
+                except LLMUnavailableError as exc:              # endpoint/quota problem?
+                    st.error(str(exc))
 
-    # Save the assistant's answer (with its sources) so it persists on the next rerun.
-    st.session_state.messages.append(
-        {
-            "role": "assistant",
-            "content": answer_display,
-            "sources": result.get("sources", []),
-            "abstained": result.get("abstained", False),
-        }
-    )
+            if result is not None:
+                # Strip inline [chunk_id] citations (confusing to the reader). Pass the
+                # retrieved ids so the exact ones are removed regardless of id format.
+                _ids = [s.get("chunk_id") for s in result.get("sources", [])]
+                answer_display = _clean_answer(result["answer"], _ids)
+                st.write(answer_display)               # show the clean answer text
+                if result.get("abstained"):            # if it abstained, say so clearly
+                    st.info("No sufficiently relevant evidence was found, so the assistant abstained.")
+
+        if result is not None:
+            # Save the assistant's answer (with its sources) so it persists on the next rerun.
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": answer_display,
+                    "sources": result.get("sources", []),
+                    "abstained": result.get("abstained", False),
+                }
+            )
+            # Keep a trace of this question for the "How it works" tab.
+            st.session_state.last_trace = {
+                "question": question,
+                "sources": result.get("sources", []),
+                "abstained": result.get("abstained", False),
+                "error": result.get("error"),
+                "diagnostics": result.get("diagnostics", {}),
+            }
+
+with flow_tab:
+    flow_view.render(PROFILE, index_name, chat_endpoint, top_k, min_score)

@@ -77,7 +77,9 @@ verified working on this Free Edition workspace).
 | `src/pipeline.py` | `build_databricks_retriever` (default) + local `build_retriever` |
 | `src/chunker.py`, `src/document_loader.py`, `src/text_cleaning.py` | Shared / fallback ingestion logic |
 | `src/evaluation.py` | Recall@K, groundedness, citation checks |
-| `app/chatbot.py` | Streamlit UI (Databricks App + local) |
+| `app/chatbot.py` | Streamlit UI (Databricks App + local): "Chat" and "How it works" tabs |
+| `app/flow_view.py` | "How it works" tab: live flow diagram (ingestion + last-question trace) |
+| `src/serving/flow_status.py` | Cheap live-status reads for that tab (volume files, index status, last job run) |
 | `app.yaml` | Databricks Apps runtime config (command + env) |
 | `tests/` | pytest unit tests (Databricks clients mocked; no network) |
 | `databricks.yml` | Asset Bundle (dev/prod targets); includes `resources/*.yml` |
@@ -157,6 +159,26 @@ streamlit run app/chatbot.py
 
 The local app embeds, retrieves, and generates entirely via Databricks endpoints
 and Vector Search — only the browser UI runs on your machine.
+
+### "How it works" tab (live flow view)
+
+A second tab draws the pipeline as **Trigger → Pipeline steps → Data & services**
+for both flows:
+
+1. **When you add a file to the volume** - files in `source_docs` and how many are
+   newer than the last `rag_ingest_ai` run (i.e. still need ingesting), the last run's
+   status, and the index's ready flag and chunk count.
+2. **When you ask a question** - a trace of your LAST question: whether the condense
+   step ran (and the rewritten query), Vector Search hits and top score, the evidence
+   check (pass/abstain), generation time, and the exact chunks retrieved.
+
+It uses only metadata APIs (Files, Vector Search `get_index`, Jobs `list_runs`),
+cached for 60 s - no model calls and no SQL warehouse. The question trace reuses the
+timings the chain already records. "Pending" files are judged by modification time;
+the job itself decides by content hash, so a re-uploaded identical file can show as
+pending but will be skipped. In the Databricks App, the service principal also needs
+`READ VOLUME` on `source_docs` and `CAN_VIEW` on the ingest job for those cards;
+without them the cards show "unavailable" and the rest still works.
 
 ## Run the tests
 

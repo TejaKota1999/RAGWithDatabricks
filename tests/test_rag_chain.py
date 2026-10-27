@@ -132,6 +132,17 @@ def test_diagnostics_present():
     assert result["diagnostics"]["top_k"] == 3
 
 
+# Per-stage timings feed the app's "How it works" tab: condense is skipped (None)
+# on a first question, retrieval and generation are measured in ms.
+def test_diagnostics_timings():
+    chain = RagChain(_retriever(), lambda q: [1.0, 0.0, 0.0], FakeLLM(), top_k=3, min_score=0.1)
+    d = chain.answer("returns?")["diagnostics"]
+    assert d["condensed"] is False
+    assert d["timings"]["condense_ms"] is None
+    assert d["timings"]["retrieve_ms"] >= 0
+    assert d["timings"]["generate_ms"] >= 0
+
+
 # A fake LLM that behaves differently for the two kinds of call the chain makes:
 #   - the CONDENSE call (system == CONDENSE_SYSTEM_PROMPT) -> return the rewrite
 #   - the ANSWER call -> return a canned answer, and record the prompt so we can

@@ -10,6 +10,9 @@ grounded answer by (1) embedding the question, (2) retrieving relevant chunks,
 
 from __future__ import annotations
 
+# time: measure how long each stage takes (shown in the app's "How it works" tab).
+import time
+
 # Callable = "a function"; Protocol lets us describe the shape of injected objects.
 from typing import Callable, Protocol
 
@@ -34,6 +37,11 @@ class _Retriever(Protocol):
 # Describes any LLM we accept: it must have a .generate(...) method.
 class _LLM(Protocol):
     def generate(self, prompt: str, system: str | None = None) -> str: ...
+
+
+# Milliseconds elapsed since a time.perf_counter() reading, rounded.
+def _ms_since(start: float) -> int:
+    return round((time.perf_counter() - start) * 1000)
 
 
 # Which metadata fields we expose as "sources" with each answer.
@@ -101,14 +109,21 @@ class RagChain:
 
         # 0) If this is a follow-up, rewrite it into a standalone question so
         #    retrieval (which has no memory) searches for the right thing.
+        # Per-stage timings in milliseconds (None = stage did not run).
+        timings = {"condense_ms": None, "retrieve_ms": None, "generate_ms": None}
+        t0 = time.perf_counter()
         search_question = self._condense(question, history) if history else question
+        if history:
+            timings["condense_ms"] = _ms_since(t0)
 
         # 1) Build the query the retriever expects: a VECTOR when we have an
         #    embed_fn (self-managed index), or the raw QUESTION TEXT when there is
         #    no embed_fn (managed-embeddings index embeds the text itself).
+        t0 = time.perf_counter()
         query = self.embed_fn(search_question) if self.embed_fn else search_question
         # 2) Retrieve the most relevant chunks above the score threshold.
         hits = self.retriever.search(query, top_k=self.top_k, min_score=self.min_score)
+        timings["retrieve_ms"] = _ms_since(t0)
 
         # Diagnostics are extra info for debugging (how many hits, best score, etc.).
         diagnostics = {
@@ -119,6 +134,9 @@ class RagChain:
             # The actual query used for retrieval (differs from `question` only when
             # a follow-up was reformulated); handy for debugging conversational memory.
             "search_query": search_question,
+            # True when a follow-up was rewritten by the condense step.
+            "condensed": bool(history),
+            "timings": timings,
         }
 
         # 3) No relevant evidence -> abstain instead of guessing.
@@ -134,9 +152,12 @@ class RagChain:
         #    and call the LLM. Passing the history lets the model answer a follow-up
         #    in light of what was said before, while still grounding on the context.
         prompt = build_user_prompt(question, hits, history=history)
+        t0 = time.perf_counter()
         try:
             text = self.llm.generate(prompt, system=SYSTEM_PROMPT)
+            timings["generate_ms"] = _ms_since(t0)
         except Exception as exc:  # never leak stack traces to the user
+            timings["generate_ms"] = _ms_since(t0)
             # If the LLM fails, return a friendly message but still show sources.
             return {
                 "answer": "The answer service is unavailable right now. Please try again later.",
